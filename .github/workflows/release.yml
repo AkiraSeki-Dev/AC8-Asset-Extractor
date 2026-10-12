@@ -10,6 +10,7 @@ on:
     paths:
       - "app/AC8_Asset_Extractor.py"
       - ".github/workflows/release.yml"
+      - "installer/**"
   workflow_dispatch:
 
 permissions:
@@ -81,12 +82,42 @@ jobs:
           mkdir -p "/tmp/pkg/AC8 Asset Extractor"
           # only what the app needs to run (plus the licence / notice files the bundled tools and font require);
           # the launcher's source and the READMEs stay in the repo
-          tar cf - --exclude=./.git --exclude=./.github --exclude=./.gitignore --exclude=./launcher \
+          tar cf - --exclude=./.git --exclude=./.github --exclude=./.gitignore --exclude=./launcher --exclude=./installer \
             --exclude=./README.md "--exclude=./AC8 Unpacker/README.md" --exclude=notes.md --exclude=__pycache__ . \
             | tar xf - -C "/tmp/pkg/AC8 Asset Extractor"
           (cd /tmp/pkg && zip -qr "$GITHUB_WORKSPACE/AC8_Asset_Extractor_${TAG}.zip" "AC8 Asset Extractor")
           python3 .github/scripts/release_notes.py "$TAG" > notes.md
           cat notes.md
+
+      - name: Build the installer (own Python, no admin)
+        if: steps.ver.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          # a full, relocatable CPython for Windows that includes Tkinter (the embeddable package doesn't)
+          gh release download --repo astral-sh/python-build-standalone \
+            --pattern "cpython-3.12.*-x86_64-pc-windows-msvc-install_only_stripped.tar.gz" --dir /tmp/pbs \
+          || gh release download --repo astral-sh/python-build-standalone \
+            --pattern "cpython-3.12.*-x86_64-pc-windows-msvc-install_only.tar.gz" --dir /tmp/pbs
+          ls /tmp/pbs
+          mkdir -p /tmp/inst
+          cp -r "/tmp/pkg/AC8 Asset Extractor/." /tmp/inst/
+          tar xzf /tmp/pbs/*.tar.gz -C /tmp/inst            # -> /tmp/inst/python/
+          test -f /tmp/inst/python/python.exe
+          # the app's packages, as Windows wheels for Python 3.12 (not compiled here: wrong Python version)
+          python3 -m pip install --quiet --no-compile --target /tmp/inst/python/Lib/site-packages \
+            --platform win_amd64 --python-version 3.12 --implementation cp --only-binary=:all: \
+            numpy Pillow pycryptodome PyOpenGL pyopengltk
+          rm -rf /tmp/inst/python/Lib/site-packages/bin /tmp/inst/python/Lib/test /tmp/inst/python/Lib/idlelib \
+                 /tmp/inst/python/include
+          find /tmp/inst/python -name __pycache__ -type d -prune -exec rm -rf {} +
+          du -sh /tmp/inst/python
+          sudo apt-get install -y -q nsis >/dev/null
+          v="${TAG#v}"
+          makensis -V2 -DVERSION="$v" -DSRC=/tmp/inst \
+            "-DOUT=$GITHUB_WORKSPACE/AC8_Asset_Extractor_${TAG}_Setup.exe" installer/ac8.nsi
+          ls -la "$GITHUB_WORKSPACE/AC8_Asset_Extractor_${TAG}_Setup.exe"
 
       - name: Publish the release
         if: steps.ver.outputs.skip == 'false'
@@ -94,5 +125,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.ver.outputs.tag }}
         run: |
-          gh release create "$TAG" "AC8_Asset_Extractor_${TAG}.zip" \
+          gh release create "$TAG" "AC8_Asset_Extractor_${TAG}_Setup.exe" "AC8_Asset_Extractor_${TAG}.zip" \
             --title "AC8 Asset Extractor $TAG" --notes-file notes.md --target "$GITHUB_SHA"

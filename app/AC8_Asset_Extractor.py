@@ -39,7 +39,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # sibling ac8_* 
 import ac8_catalog as catalog  # noqa: E402  (pure python, no extra packages)
 
 APP_NAME = "ACE Combat 8 Asset Extractor"
-APP_VERSION = "1.0"
+APP_VERSION = "1.1"
 CODE = Path(__file__).resolve().parent         # app/: the scripts and their fonts, icons and web viewer
 HERE = CODE.parent                             # the app folder (the exe, app/, AC8 Unpacker/, data/, logs/)
 DATA_DIR = HERE / "data"                       # your own files: settings, asset list, update history
@@ -2451,7 +2451,7 @@ class App(tk.Tk):
             if not box.get("ok"):
                 return f"Update to {info['version']} skipped"
             self.post("step", f"Updating to {info['version']}…")
-            ac8_update.install(HERE, info["url"], log=lambda t: self.post("log", t))
+            ac8_update.install(HERE, info["url"], log=lambda t: self.post("log", t), version=info["version"])
             self.post("call", lambda: self.after(800, self._restart))
             return f"✔ Updated to v{info['version']} — restarting…"
 

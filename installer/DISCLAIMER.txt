@@ -1,0 +1,12 @@
+AC8 Asset Extractor — Ace Combat 8
+
+A utility designed to extract and organize game assets from Ace Combat 8 for modding, research, and educational purposes. The tool aims to simplify asset extraction and inspection, allowing users to explore aircraft models, textures, and other game resources for personal projects and technical analysis.
+
+Disclaimer: This tool is intended for legitimate modding, research, and educational use only. Unauthorized redistribution, commercial exploitation, and misuse of copyrighted assets are not supported. All extracted assets remain the property of their respective copyright holders.
+
+Third-party components included with this installer:
+- Python (Python Software Foundation License), with numpy, Pillow, pycryptodome, PyOpenGL and pyopengltk (each under its own open-source licence).
+- retoc — Copyright (c) 2025 Truman Kilen and Archengius, MIT License.
+- repak — Copyright 2024 Truman Kilen, spuds, MIT / Apache-2.0.
+- Outfit font (SIL Open Font License) and three.js (MIT License).
+Full notices are in the "AC8 Unpacker\tools" folder after installing.

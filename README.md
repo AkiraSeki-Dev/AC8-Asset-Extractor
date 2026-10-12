@@ -10,16 +10,21 @@ textures, and other game resources for personal projects and technical analysis.
 
 ## Install
 
-1. Install [Python 3.10 or newer](https://www.python.org/downloads/) (tick **Add python.exe to PATH**).
-2. Download the latest zip from the [Releases page](https://github.com/AkiraSeki-Dev/AC8-Asset-Extractor/releases/latest)
-   and unzip it anywhere.
-3. Double-click **`AC8 Asset Extractor.exe`**.
+Get the latest version from the [Releases page](https://github.com/AkiraSeki-Dev/AC8-Asset-Extractor/releases/latest):
+
+- **`AC8_Asset_Extractor_vX.Y_Setup.exe` (recommended):** run it and follow the steps. It brings its own Python, so
+  nothing else needs installing, and it doesn't need admin rights. It adds a Start menu shortcut (and a desktop one if
+  you like) and appears in Windows' **Apps** list for uninstalling. Windows may show "Windows protected your PC" because
+  the installer isn't signed: click **More info → Run anyway**.
+- **`AC8_Asset_Extractor_vX.Y.zip` (portable):** unzip it anywhere and double-click **`AC8 Asset Extractor.exe`**.
+  Needs [Python 3.10 or newer](https://www.python.org/downloads/) installed (tick **Add python.exe to PATH**).
 
 ## First-time setup
 
 Open **Settings** (top right). An orange **Setup needed** bar tells you if anything is still missing.
 
-1. **Install packages:** installs what the app needs (one click).
+1. **Install packages:** only for the zip version: installs what the app needs (one click). The installer already
+   includes them.
 2. **Game folder:** usually found automatically through Steam. Otherwise use **Browse…** and pick the folder that
    holds `start_protected_game.exe`.
 3. **AES key:** the game's files are encrypted, so the key is read from the running game, once:
@@ -92,6 +97,9 @@ AC8 Asset Extractor\
 - 3D previews are cleared when the app closes (Settings → 3D previews to keep them).
 
 ## Version history
+
+v1.1: a Windows installer (`…_Setup.exe`) that includes its own Python and packages, installs without admin rights,
+adds Start menu / desktop shortcuts and an uninstaller. The zip stays available for portable use.
 
 v1.0: first public release.
 

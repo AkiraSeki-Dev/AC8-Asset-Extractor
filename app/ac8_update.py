@@ -61,7 +61,22 @@ def _kept(rel):
     return any(r == k.rstrip("/") or r.startswith(k) for k in KEEP)
 
 
-def install(app_dir, url, log=print):
+UNINSTALL_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\AC8AssetExtractor"
+
+
+def _note_installed_version(version):
+    """Installed with the setup program: keep the version shown in Windows' Apps list up to date."""
+    if os.name != "nt" or not version:
+        return
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, UNINSTALL_KEY, 0, winreg.KEY_SET_VALUE) as k:
+            winreg.SetValueEx(k, "DisplayVersion", 0, winreg.REG_SZ, version)
+    except OSError:
+        pass  # not installed with the setup program (zip copy): nothing to update
+
+
+def install(app_dir, url, log=print, version=None):
     """Download the release zip and copy it over app_dir. -> number of files written."""
     app_dir = Path(app_dir)
     log("  Downloading the update…")
@@ -94,6 +109,7 @@ def install(app_dir, url, log=print):
             n += 1
     for cache in (app_dir / "__pycache__", app_dir / "app" / "__pycache__"):
         shutil.rmtree(cache, ignore_errors=True)
+    _note_installed_version(version)
     log(f"  ✔ {n} files updated")
     return n
 
