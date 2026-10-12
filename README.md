@@ -98,6 +98,10 @@ AC8 Asset Extractor\
 
 ## Version history
 
+v1.2: fixed in-app updates failing with "Access is denied" on the app's font (Windows keeps it locked while the app
+runs). Updates now skip unchanged files, swap all changed files in together, and finish any locked file the next
+time the app starts.
+
 v1.1: a Windows installer (`…_Setup.exe`) that includes its own Python and packages, installs without admin rights,
 adds Start menu / desktop shortcuts and an uninstaller. The zip stays available for portable use.
 

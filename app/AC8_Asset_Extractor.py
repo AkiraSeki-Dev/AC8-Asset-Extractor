@@ -39,7 +39,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # sibling ac8_* 
 import ac8_catalog as catalog  # noqa: E402  (pure python, no extra packages)
 
 APP_NAME = "ACE Combat 8 Asset Extractor"
-APP_VERSION = "1.1"
+APP_VERSION = "1.2"
 CODE = Path(__file__).resolve().parent         # app/: the scripts and their fonts, icons and web viewer
 HERE = CODE.parent                             # the app folder (the exe, app/, AC8 Unpacker/, data/, logs/)
 DATA_DIR = HERE / "data"                       # your own files: settings, asset list, update history
@@ -4730,6 +4730,11 @@ if __name__ == "__main__":
         __import__("traceback").format_exception(t, v, tb)).rstrip())
     threading.excepthook = lambda a: SLOG.write(f"Unhandled in thread {a.thread.name if a.thread else '?'}: " + "".join(
         __import__("traceback").format_exception(a.exc_type, a.exc_value, a.exc_traceback)).rstrip())
+    try:  # files an update couldn't replace while the app was running (e.g. its font): swap them in first
+        import ac8_update
+        ac8_update.apply_pending(HERE)
+    except Exception:
+        pass
     move_user_data()  # before App() reads the settings / asset list / history
     load_private_fonts()
     app = App()

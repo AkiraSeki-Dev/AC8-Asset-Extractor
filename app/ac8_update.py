@@ -76,12 +76,19 @@ def _note_installed_version(version):
         pass  # not installed with the setup program (zip copy): nothing to update
 
 
+PENDING = ".pending"   # a new file that couldn't replace the old one yet (locked): swapped in at the next start
+
+
 def install(app_dir, url, log=print, version=None):
-    """Download the release zip and copy it over app_dir. -> number of files written."""
+    """Download the release zip and put it over app_dir. -> number of files changed.
+
+    All changed files are first written next to the old ones, then swapped in, so a problem part-way can't leave a
+    mix of old and new files. Unchanged files are skipped. A file Windows keeps locked while the app runs (its own
+    font, the running launcher) is queued as <name>.pending and swapped in by apply_pending() at the next start."""
     app_dir = Path(app_dir)
     log("  Downloading the update…")
     data = _get(url, timeout=300)
-    n = 0
+    staged = []
     with zipfile.ZipFile(io.BytesIO(data)) as z:
         names = [i for i in z.infolist() if not i.is_dir()]
         # the zip holds one top folder ("AC8 Asset Extractor/…"): strip it
@@ -92,30 +99,61 @@ def install(app_dir, url, log=print, version=None):
             if not rel or rel.startswith("/") or ".." in Path(rel).parts or _kept(rel):
                 continue
             dest = app_dir / rel
-            dest.parent.mkdir(parents=True, exist_ok=True)
             payload = z.read(info)
-            if dest.name.lower() == LAUNCHER.lower() and dest.exists():
-                # the launcher is running: Windows lets a running exe be renamed, not overwritten
-                old = dest.with_name(dest.name + ".old")
-                try:
-                    if old.exists():
-                        old.unlink()
-                    dest.rename(old)
-                except OSError:
-                    pass
+            try:
+                if dest.exists() and dest.read_bytes() == payload:
+                    continue  # unchanged
+            except OSError:
+                pass
+            dest.parent.mkdir(parents=True, exist_ok=True)
             tmp = dest.with_name(dest.name + ".new")
             tmp.write_bytes(payload)
+            staged.append((tmp, dest))
+    log(f"  {len(staged)} file(s) to update")
+    later = 0
+    for tmp, dest in staged:
+        if dest.name.lower() == LAUNCHER.lower() and dest.exists():
+            # the launcher is running: Windows lets a running exe be renamed, not overwritten
+            old = dest.with_name(dest.name + ".old")
+            try:
+                if old.exists():
+                    old.unlink()
+                dest.rename(old)
+            except OSError:
+                pass
+        try:
             os.replace(tmp, dest)
-            n += 1
+        except OSError:  # locked: finish it at the next start
+            os.replace(tmp, dest.with_name(dest.name + PENDING))
+            later += 1
     for cache in (app_dir / "__pycache__", app_dir / "app" / "__pycache__"):
         shutil.rmtree(cache, ignore_errors=True)
     _note_installed_version(version)
-    log(f"  ✔ {n} files updated")
-    return n
+    log(f"  ✔ {len(staged) - later} file(s) updated" + (f", {later} more when the app restarts" if later else ""))
+    return len(staged)
+
+
+def apply_pending(app_dir):
+    """At start-up, before anything is loaded: swap in files an update had to leave for later, and clear leftovers
+    of an interrupted update."""
+    app_dir = Path(app_dir)
+    # only the program's own files: the root (launcher), app\ and the unpacker script — never data\ or exports
+    found = []
+    for folder, deep in ((app_dir, False), (app_dir / "app", True), (app_dir / "AC8 Unpacker", False)):
+        if folder.is_dir():
+            for pattern in ("*" + PENDING, "*.new"):
+                found += list(folder.rglob(pattern) if deep else folder.glob(pattern))
+    for f in found:
+        target = f.with_name(f.name[: -len(f.suffix)])
+        try:
+            os.replace(f, target)
+        except OSError:
+            pass
 
 
 def cleanup(app_dir):
     """Remove the launcher left over from the last update (it was still running then)."""
+    apply_pending(app_dir)
     old = Path(app_dir) / (LAUNCHER + ".old")
     try:
         if old.exists():
