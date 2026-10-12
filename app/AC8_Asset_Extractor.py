@@ -1124,9 +1124,24 @@ class App(tk.Tk):
         self.cards_win = self.canvas.create_window(0, 0, window=self.cards, anchor="nw")
         self.cards.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
         self.canvas.bind("<Configure>", lambda e: self.canvas.itemconfigure(self.cards_win, width=e.width))
-        # A divider (PanedWindow sash) shows the resize cursor while the mouse is over it and puts it back when the
-        # mouse leaves. When a tab's layout appears under the mouse, Windows doesn't always report that "leave", and
-        # the resize cursor stays stuck over the whole catalog: put it back as soon as the mouse enters anything else.
+        # A divider (PanedWindow sash) shows the resize cursor by setting it on the whole divider widget while the
+        # mouse is over the sash, and puts it back when the mouse leaves. On Windows Tk only re-reads the cursor of
+        # the window the mouse is in when that window's own cursor changes, so after the divider has put its cursor
+        # back, the page the mouse moved into keeps showing the resize arrows (until the mouse crosses into another
+        # widget). Fix: whenever a divider puts its cursor back, and whenever the mouse enters something, re-apply
+        # the cursor of the widget under the mouse so Tk works it out again.
+        self.tk.eval("""
+            namespace eval ::ac8 {}
+            proc ::ac8::touchCursor {} {
+                set w [winfo containing [winfo pointerx .] [winfo pointery .]]
+                if {$w ne "" && [winfo exists $w]} { catch { $w configure -cursor [$w cget -cursor] } }
+            }
+            foreach p {Leave Cursor} {
+                if {[info procs ::ac8::pw$p] eq "" && [info procs ::tk::panedwindow::$p] ne ""} {
+                    rename ::tk::panedwindow::$p ::ac8::pw$p
+                    proc ::tk::panedwindow::$p {w} "::ac8::pw$p \\$w; after idle ::ac8::touchCursor"
+                }
+            }""")
         self.bind_all("<Enter>", self._unstick_sash_cursor, add="+")
         self.bind_all("<MouseWheel>", lambda e: self._scroll(-1 if e.delta > 0 else 1, e))
         self.bind_all("<Button-4>", lambda e: self._scroll(-1, e))
@@ -1154,6 +1169,10 @@ class App(tk.Tk):
                     pw.configure(cursor="")
             except tk.TclError:
                 pass
+        try:
+            self.tk.call("::ac8::touchCursor")
+        except tk.TclError:
+            pass
 
     def _scroll(self, direction, e):
         w = self.winfo_containing(e.x_root, e.y_root)
