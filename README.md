@@ -93,12 +93,6 @@ AC8 Asset Extractor\
 
 ## Version history
 
-v1.0.2: the Oodle decompressor (`oo2core_9_win64.dll`), which can't be shipped in the download, is now fetched by the
-app on first start and by Settings → Tools → Check for updates, and checked before it's saved.
-
-v1.0.1: update checks no longer fail with "rate limit exceeded" — they use GitHub's normal release pages instead of
-its API, which only allows a few lookups an hour per internet connection.
-
 v1.0: first public release.
 
 ## Credits
