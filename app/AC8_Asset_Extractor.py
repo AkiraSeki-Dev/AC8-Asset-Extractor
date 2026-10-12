@@ -46,6 +46,7 @@ DATA_DIR = HERE / "data"                       # your own files: settings, asset
 SETTINGS_FILE = DATA_DIR / "ac8_extractor_settings.json"
 INDEX_FILE = DATA_DIR / "asset_index.txt"
 HISTORY_FILE = DATA_DIR / "asset_history.json"   # files that appeared in each game update (found by Scan Game)
+ARROW = "arrow" if os.name == "nt" else ""  # the standard pointer (X11's own "arrow" is a different shape)
 FONTS_DIR = CODE / "fonts"
 ASSETS_DIR = CODE / "assets"
 
@@ -900,7 +901,7 @@ class App(tk.Tk):
         self.v_pkgs = tk.StringVar()
         self.v_count = tk.StringVar()
         self.v_notice = tk.StringVar()
-        self.v_sel = tk.StringVar(value="Nothing ticked")
+        self.v_sel = tk.StringVar(value="Nothing selected")
         self.v_browser = tk.StringVar(value="")
         if not self.v_game.get():
             self.v_game.set(detect_game_dir())
@@ -982,9 +983,9 @@ class App(tk.Tk):
         Button(tb, "Scan Game", self.scan_game, icon="⟳").pack(side="left")
         Button(tb, "Import List…", self.import_list, icon="⇪").pack(side="left", padx=(6, 0))
         sep()
-        self.btn_tick_all = Button(tb, "Tick All Shown", self.tick_all_shown, icon="☑")
+        self.btn_tick_all = Button(tb, "Select All Shown", self.tick_all_shown, icon="☑")
         self.btn_tick_all.pack(side="left")
-        Button(tb, "Clear Ticks", self.clear_ticks, icon="✕").pack(side="left", padx=(6, 0))
+        Button(tb, "Clear Selection", self.clear_ticks, icon="✕").pack(side="left", padx=(6, 0))
         Button(tb, "Preview 3D", self.preview_selected, icon="◉").pack(side="left", padx=(6, 0))
         sep()
         tk.Label(tb, textvariable=self.v_sel, bg=C["bg1"], fg=C["accent"], font=F["bold"]).pack(side="left")
@@ -992,7 +993,7 @@ class App(tk.Tk):
         self.btn_stop = Button(tb, "Stop", self.stop, variant="danger", icon="■")
         self.btn_stop.pack(side="right")
         self.btn_stop.set_enabled(False)
-        self.btn_extract = Button(tb, "Extract Ticked", self.extract, variant="primary", icon="▶", padx=16)
+        self.btn_extract = Button(tb, "Extract Selected", self.extract, variant="primary", icon="▶", padx=16)
         self.btn_extract.pack(side="right", padx=(0, 8))
         tk.Frame(tb, bg=C["border2"], width=1, height=26).pack(side="right", padx=8)
         Check(tb, self.v_keep_raw, "Keep Raw").pack(side="right", padx=(10, 0))
@@ -1081,7 +1082,7 @@ class App(tk.Tk):
         self._extr_shown = True
         self.tree = ttk.Treeview(box, style="Dark.Treeview", columns=("assets", "meshes", "textures"),
                                  selectmode="extended")
-        self.tree.heading("#0", text="NAME   (click the box to tick · double-click to open)", anchor="w")
+        self.tree.heading("#0", text="NAME   (click the box to select · double-click to open)", anchor="w")
         for col, text, w in (("assets", "ASSETS", 80), ("meshes", "MESHES", 76), ("textures", "TEXTURES", 82)):
             self.tree.heading(col, text=text, anchor="e")
             self.tree.column(col, width=round(w * SCALE), anchor="e", stretch=False)
@@ -1309,7 +1310,7 @@ class App(tk.Tk):
             shown = len(hits)
             self.v_browser.set(f"{fmt(shown)} matches" + (" (showing first folders)" if shown > 20000 else ""))
             self.btn_tick_all.set_enabled(shown > 0)
-            self.btn_tick_all.set_text("☑  Tick All Results")
+            self.btn_tick_all.set_text("☑  Select All Results")
         else:
             self.view, self.view_t = self.index, t
             node = self.index.nodes.get(root_key)
@@ -1317,7 +1318,7 @@ class App(tk.Tk):
             where = root_key.replace("/", " › ") if root_key else "whole game"
             self.v_browser.set(f"{fmt(shown)} {TYPE_LABEL[t].lower() if t != 'all' else 'assets'} · {where}")
             self.btn_tick_all.set_enabled(bool(root_key) and shown > 0)
-            self.btn_tick_all.set_text("☑  Tick All Shown")
+            self.btn_tick_all.set_text("☑  Select All Shown")
         if node is not None:
             self._insert_children("", node)
             if words and shown <= 400:
@@ -1465,7 +1466,7 @@ class App(tk.Tk):
 
     def _update_selection(self):
         if not self.checked:
-            self.v_sel.set("Nothing ticked")
+            self.v_sel.set("Nothing selected")
             return
         t = self.v_type.get()
         total = 0
@@ -1478,7 +1479,7 @@ class App(tk.Tk):
             elif t == "all" or asset_type(fname) == t:
                 total += 1
         what = TYPE_LABEL[t].lower() if t != "all" else "assets"
-        self.v_sel.set(f"{len(self.checked)} ticked  ·  {fmt(total)} {what}")
+        self.v_sel.set(f"{len(self.checked)} selected  ·  {fmt(total)} {what}")
 
     # ---------------------------------------------------------- extraction cards
 
@@ -1500,7 +1501,7 @@ class App(tk.Tk):
         if not self.folders:
             empty = tk.Frame(self.cards, bg=C["bg1"])
             tk.Label(empty, text="No extractions yet", bg=C["bg1"], fg=C["text1"], font=F["h"]).pack(pady=(30, 4))
-            tk.Label(empty, text="Tick assets on the left, then press  ▶ Extract Ticked.", bg=C["bg1"],
+            tk.Label(empty, text="Select assets on the left, then press  ▶ Extract Selected.", bg=C["bg1"],
                      fg=C["text3"], font=F["base"]).pack()
             self.card_widgets = [empty]
         for w in self.card_widgets:
@@ -1527,7 +1528,7 @@ class App(tk.Tk):
         state, kind = (("RUNNING", "accent") if running else ("DONE", "ok") if glb or png
                        else ("RAW", "accent") if raw else ("EMPTY", "muted"))
         Pill(r1, state, kind).pack(side="right")
-        what = info.get("ticked") or info.get("asset filter") or "—"
+        what = info.get("selected") or info.get("ticked") or info.get("asset filter") or "—"
         if len(what) > 90:
             what = what[:87] + "…"
         when = info.get("date") or _dt.datetime.fromtimestamp(folder.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
@@ -2002,11 +2003,11 @@ class App(tk.Tk):
 
     def _write_info(self, folder, ticked=None, type_label=None, n_raw=0, meshes=0, textures=0, started=None, fbx=0):
         old = read_info(folder)
-        ticked = ticked if ticked is not None else old.get("ticked", old.get("asset filter", ""))
+        ticked = ticked if ticked is not None else old.get("selected", old.get("ticked", old.get("asset filter", "")))
         type_label = type_label or old.get("type", "All types")
         info = (f"{APP_NAME} extraction\n"
                 f"Date:          {_dt.datetime.now():%Y-%m-%d %H:%M}\n"
-                f"Ticked:        {ticked}\n"
+                f"Selected:      {ticked}\n"
                 f"Type:          {type_label}\n"
                 f"Raw UAssets:   {n_raw}\n"
                 f"GLB meshes:    {meshes}\n"
@@ -2074,7 +2075,7 @@ class App(tk.Tk):
             scan = [raw / r for r in need if (raw / r).exists()]
             got += len(scan)
         if got:
-            self.post("log", f"✔ Shared materials: {got} package(s) from outside the ticked folders")
+            self.post("log", f"✔ Shared materials: {got} package(s) from outside the selected folders")
 
     def _step_emblems(self, key, raw, paks):
         """Liveries put emblems from a shared folder (Vehicles/Aircraft/Common/Emblem, Emblem/…) on the aircraft —
@@ -2171,10 +2172,10 @@ class App(tk.Tk):
 
     def extract(self):
         if not len(self.index):
-            messagebox.showinfo(APP_NAME, "Scan the game or import a list first, then tick what you want.")
+            messagebox.showinfo(APP_NAME, "Scan the game or import a list first, then select what you want.")
             return
         if not self.checked:
-            messagebox.showinfo(APP_NAME, "Tick at least one folder or asset in the browser.")
+            messagebox.showinfo(APP_NAME, "Select at least one folder or asset in the browser.")
             return
         convert = self.v_convert.get()
         if not self._check_ready(need_convert=convert):
@@ -2185,7 +2186,7 @@ class App(tk.Tk):
         t = self.v_type.get()
         assets = self._selected_assets()
         if not assets:
-            messagebox.showinfo(APP_NAME, f"None of the ticked items contain {TYPE_LABEL[t].lower()}.")
+            messagebox.showinfo(APP_NAME, f"None of the selected items contain {TYPE_LABEL[t].lower()}.")
             return
         filters = make_filters(self.index, assets, t)
         if len(assets) > 20000 and not messagebox.askyesno(
@@ -2638,22 +2639,25 @@ class App(tk.Tk):
                                showhandle=False, sashcursor="sb_h_double_arrow")
         split.pack(fill="both", expand=True)
         self.cat_split = split
-        left = tk.Frame(split, bg=C["bg1"])
+        # every part of the catalog has a cursor of its own (an arrow), so none of it can show the divider's
+        # resize arrows: on Windows a widget without one borrows the divider's while it is being hovered
+        left = tk.Frame(split, bg=C["bg1"], cursor=ARROW)
         split.add(left, minsize=round(220 * SCALE), width=self.settings_cat_width or round(380 * SCALE))
         sbox = tk.Frame(left, bg=C["bg1"], padx=8, pady=8)
         sbox.pack(fill="x")
         Input(sbox, self.v_cat_search, icon="⌕", placeholder="Filter the catalog…").pack(fill="x")
         self.v_cat_search.trace_add("write", lambda *_: self.refresh_catalog())
-        tframe = tk.Frame(left, bg=C["bg1"])
+        tframe = tk.Frame(left, bg=C["bg1"], cursor=ARROW)
         tframe.pack(fill="both", expand=True)
-        self.cat_tree = ttk.Treeview(tframe, style="Dark.Treeview", show="tree", selectmode="browse")
-        sb = ttk.Scrollbar(tframe, orient="vertical", command=self.cat_tree.yview, style="Dark.Vertical.TScrollbar")
+        self.cat_tree = ttk.Treeview(tframe, style="Dark.Treeview", show="tree", selectmode="browse", cursor=ARROW)
+        sb = ttk.Scrollbar(tframe, orient="vertical", command=self.cat_tree.yview, style="Dark.Vertical.TScrollbar",
+                           cursor=ARROW)
         self.cat_tree.configure(yscrollcommand=sb.set)
         sb.pack(side="right", fill="y")
         self.cat_tree.pack(fill="both", expand=True)
         self.cat_tree.tag_configure("group", font=F["bold"], foreground=C["text2"])
         self.cat_tree.bind("<<TreeviewSelect>>", lambda e: self._cat_select())
-        right = tk.Frame(split, bg=C["bg1"])
+        right = tk.Frame(split, bg=C["bg1"], cursor=ARROW)
         split.add(right, minsize=round(360 * SCALE), stretch="always")
         # fixed action bar for the picked entry (title left, buttons right) — stays put while the list scrolls
         self.cat_head = tk.Frame(right, bg=C["bg1"])
@@ -2759,7 +2763,7 @@ class App(tk.Tk):
             t.selection_set(sel[0])
         elif not self.cat_detail.winfo_children():
             self._cat_message("Pick an aircraft or weapon", "Its parts are listed here, sorted by what they are, "
-                                                            "with Preview and Tick buttons.")
+                                                            "with Preview and Select buttons.")
 
     def _cat_clear_head(self):
         for w in self.cat_head.winfo_children():
@@ -2812,7 +2816,7 @@ class App(tk.Tk):
             tk.Label(r, text=stem, bg=C["bg2"], fg=C["text3"], font=F["mono_s"], anchor="w").pack(side="left",
                                                                                                   padx=(6, 0))
         small = dict(font=F["small"], padx=8, pady=1)
-        Button(r, "Tick", lambda k=key: self._tick_keys([k]), **small).pack(side="right", padx=(0, 6), pady=3)
+        Button(r, "Select", lambda k=key: self._tick_keys([k]), **small).pack(side="right", padx=(0, 6), pady=3)
         if mesh:
             Button(r, "Preview", lambda k=key, l=label: self.preview_meshes([k], l), **small).pack(
                 side="right", padx=(0, 6), pady=3)
@@ -2825,7 +2829,7 @@ class App(tk.Tk):
                 self.checked.add(k)
         self._refresh_boxes()
         if not quiet:
-            self.v_step.set(f"Ticked {len(keys)} item(s) — {self.v_sel.get()}")
+            self.v_step.set(f"Selected {len(keys)} item(s) — {self.v_sel.get()}")
 
     def _cat_select(self):
         sel = self.cat_tree.selection()
@@ -2855,7 +2859,7 @@ class App(tk.Tk):
         a = self.cat_data["aircraft"][fkey]
         meshes = a["meshes"]
         main = next((k for k, sec, _l in meshes if sec == "Airframe"), meshes[0][0] if meshes else None)
-        btns = [("Tick whole aircraft", lambda: self._tick_keys([fkey]), "default"),
+        btns = [("Select whole aircraft", lambda: self._tick_keys([fkey]), "default"),
                 ("Extract now", lambda: (self._tick_keys([fkey], True), self.extract()), "primary")]
         if main:
             fittings = [k for k, sec, _l in meshes if sec in ("Landing gear", "Refuel probe", "Special weapon pylons")
@@ -2894,7 +2898,7 @@ class App(tk.Tk):
         allm = [m for v in w["variants"].values() for m in v["meshes"]]
         self._cat_header(w["name"], f"{w['category']}   ·   code {code}   ·   {len(w['variants'])} variant(s)",
                          [("Preview all variants", lambda: self.preview_meshes(allm, w["name"]), "default"),
-                          ("Tick all variants", lambda: self._tick_keys([v["folder"] for v in w["variants"].values()]),
+                          ("Select all variants", lambda: self._tick_keys([v["folder"] for v in w["variants"].values()]),
                            "default")])
         f = self._cat_section("Variants", "The letter after the code is the variant (a0, r0, f0, j0, x0 …), "
                                           "usually a different country's version of the weapon.")
@@ -2906,7 +2910,7 @@ class App(tk.Tk):
 
     def _show_launcher(self, name):
         v = self.cat_data["launchers"][name]
-        self._cat_header(name, v["folder"], [("Tick", lambda: self._tick_keys([v["folder"]]), "default")])
+        self._cat_header(name, v["folder"], [("Select", lambda: self._tick_keys([v["folder"]]), "default")])
         self._cat_section("About", "Launchers and racks only have textures and materials here; their geometry is "
                                    "built into each aircraft's special weapon pylon meshes.")
 
@@ -2942,7 +2946,7 @@ class App(tk.Tk):
         by = {}
         for k in added:
             by.setdefault(k.rsplit("/", 1)[0], []).append(k)
-        btns = [("Tick all new files", lambda: self._tick_keys(added), "default")]
+        btns = [("Select all new files", lambda: self._tick_keys(added), "default")]
         if meshes:
             btns.insert(0, ("Preview new meshes" + (" (first 30)" if len(meshes) > 30 else ""),
                             lambda: self.preview_meshes(meshes[:30], f"New in update {u['date']}"), "default"))
@@ -2968,11 +2972,11 @@ class App(tk.Tk):
                          pady=5).pack(side="left")
                 Button(r, "Open", lambda x=iid: self._cat_goto(x), font=F["small"], padx=8, pady=1).pack(
                     side="right", padx=6, pady=3)
-        f = self._cat_section(f"New files by folder  ({len(by)})", "Tick a folder to extract just the new files.")
+        f = self._cat_section(f"New files by folder  ({len(by)})", "Select a folder to extract just the new files.")
         for folder in sorted(by)[:300]:
             self._cat_folder_row(f, folder, by[folder])
         if len(by) > 300:
-            tk.Label(f, text=f"… and {len(by) - 300} more folders (use Tick all new files)", bg=C["bg1"],
+            tk.Label(f, text=f"… and {len(by) - 300} more folders (use Select all new files)", bg=C["bg1"],
                      fg=C["text3"], font=F["small"]).pack(anchor="w")
 
     def _cat_goto(self, iid):
@@ -2993,7 +2997,7 @@ class App(tk.Tk):
         tk.Label(r, text=f"{len(keys)} file(s)" + (f" · {len(meshes)} mesh(es)" if meshes else ""), bg=C["bg2"],
                  fg=C["text3"], font=F["small"]).pack(side="left", padx=(6, 0))
         small = dict(font=F["small"], padx=8, pady=1)
-        Button(r, "Tick", lambda: self._tick_keys(keys), **small).pack(side="right", padx=(0, 6), pady=3)
+        Button(r, "Select", lambda: self._tick_keys(keys), **small).pack(side="right", padx=(0, 6), pady=3)
         if meshes:
             Button(r, "Preview", lambda: self.preview_meshes(meshes[:30], folder.rsplit("/", 1)[-1]), **small).pack(
                 side="right", padx=(0, 6), pady=3)
@@ -3002,7 +3006,7 @@ class App(tk.Tk):
         it = self.cat_data["collections"][gname][ikey]
         meshes = sorted(it["meshes"])
         new = self._latest_new()
-        btns = [("Tick all", lambda: self._tick_keys([ikey] if self.index.nodes.get(ikey) else it["keys"]),
+        btns = [("Select all", lambda: self._tick_keys([ikey] if self.index.nodes.get(ikey) else it["keys"]),
                  "default"),
                 ("Extract now", lambda: (self._tick_keys([ikey] if self.index.nodes.get(ikey) else it["keys"], True),
                                          self.extract()), "primary")]
@@ -3024,7 +3028,7 @@ class App(tk.Tk):
         tk.Label(self.cat_detail, text=summary, bg=C["bg1"], fg=C["text3"], font=F["small"], anchor="w",
                  padx=16).pack(fill="x")
         if not meshes:
-            self._cat_section("No 3D models here", "This folder has no meshes — Tick or Extract it to get its "
+            self._cat_section("No 3D models here", "This folder has no meshes — Select or Extract it to get its "
                                                     "files (textures come out as PNG).")
         by = {}
         # characters (incl. the online ones): by what the mesh is (outfits, faces, hair …), not by folder
@@ -3039,7 +3043,7 @@ class App(tk.Tk):
         shown = 0
         for sub in sorted(by, key=lambda x: (order.index(x) if parts and x in order else len(order), x)):
             if shown >= 400:
-                tk.Label(self.cat_detail, text=f"… {len(meshes) - shown} more meshes — use Tick all / the Assets tab.",
+                tk.Label(self.cat_detail, text=f"… {len(meshes) - shown} more meshes — use Select all / the Assets tab.",
                          bg=C["bg1"], fg=C["text3"], font=F["small"], padx=16).pack(anchor="w", pady=6)
                 break
             f = self._cat_section(f"{sub or 'Models'}  ({len(by[sub])})")
@@ -3108,7 +3112,7 @@ class App(tk.Tk):
             return
         keys = [k for k in self.tree.selection() if not k.startswith("\0")] or sorted(self.checked)
         if not keys:
-            messagebox.showinfo(APP_NAME, "Click a mesh or folder in the browser (or tick some), then press "
+            messagebox.showinfo(APP_NAME, "Click a mesh or folder in the browser (or select some), then press "
                                           "Preview 3D.")
             return
         meshes = []
@@ -3370,7 +3374,7 @@ class App(tk.Tk):
             if has_game and not lv.get("in_game"):
                 label = "variant " + label  # cutscene / enemy versions — not selectable in the game
             opts.append((lv["id"], label + (f"  ({', '.join(tags)})" if tags else "")))
-        self.dd_view_livery.set_options(opts if data else [("", "— extract the whole aircraft —")])
+        self.dd_view_livery.set_options(opts if data else [("", "Not extracted yet")])
         # a different aircraft starts as it sits on the deck: gear down, probe stowed, no pylon set; picks made
         # in the dropdowns stay while you keep looking at the same aircraft
         m_ = self.AIRCRAFT_RE.match(path.stem)
@@ -4340,7 +4344,7 @@ class App(tk.Tk):
 
     def _ov_toggle_editor(self):
         if not self._view_liv_data and not self._ov_editing:
-            self.v_view_status.set("Liveries need the whole aircraft extracted (tick the aircraft folder, Extract).")
+            self.v_view_status.set("Liveries need the whole aircraft extracted (select the aircraft folder, Extract).")
             return
         self._ov_editing = not self._ov_editing
         if self._ov_editing:

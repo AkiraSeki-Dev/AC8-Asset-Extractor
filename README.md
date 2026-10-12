@@ -38,11 +38,11 @@ Open **Settings** (top right). An orange **Setup needed** bar tells you if anyth
 
 ## Extracting
 
-- **Assets tab:** find files with the **Category / Group / Type** dropdowns or the search bar, tick them, and press
-  **▶ Extract Ticked**.
+- **Assets tab:** find files with the **Category / Group / Type** dropdowns or the search bar, select them, and press
+  **▶ Extract Selected**.
 - **Catalog tab:** the same files sorted into aircraft, weapons, characters, vehicles, environments and so on. Pick
   an entry and use **Extract now**, or **Preview** a part in 3D first.
-- **Tick the whole aircraft folder** so its meshes, materials and textures come out together. That's how textures
+- **Select the whole aircraft folder** so its meshes, materials and textures come out together. That's how textures
   get linked to each part.
 - Options next to the Extract button: **Export PNG+GLB** (convert the files), **Export FBX**, **Keep Raw** (keep the
   unpacked game files).
@@ -92,7 +92,7 @@ AC8 Asset Extractor\
 
 ## Tips
 
-- Parts that come out light grey use a material from another folder (e.g. shared cockpit glass): tick that too.
+- Parts that come out light grey use a material from another folder (e.g. shared cockpit glass): select that too.
 - If something fails, the log at the bottom says why, and the rest of the extraction carries on. Send the file
   from the **Logs folder** when reporting a problem.
 - 3D previews are cleared when the app closes (Settings → 3D previews to keep them).
