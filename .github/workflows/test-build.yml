@@ -1,6 +1,6 @@
-# A build to try out before releasing: push to the test-build branch (or run it from the Actions tab) and
-# download "AC8 Asset Extractor test build" from the run's Artifacts section. Same files as a release
-# (portable zip + Setup.exe), but nothing is published and the app's updater never sees it.
+# A build to try out before releasing: push to the test-build branch (or run it from the Actions tab). The files
+# (Setup.exe + portable zip, same as a release) appear on the Releases page as the "Test build" pre-release,
+# replacing the previous one. Pre-releases are never "latest", so the app's updater never offers them.
 name: Test build
 
 on:
@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -97,11 +97,14 @@ jobs:
             "-DOUT=$GITHUB_WORKSPACE/AC8_Asset_Extractor_${TAG}_Setup.exe" installer/ac8.nsi
           ls -la "$GITHUB_WORKSPACE/AC8_Asset_Extractor_${TAG}_Setup.exe"
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: AC8 Asset Extractor test build (${{ steps.ver.outputs.short }})
-          path: |
-            AC8_Asset_Extractor_*_Setup.exe
-            AC8_Asset_Extractor_*.zip
-          retention-days: 14
-          compression-level: 0
+      - name: Publish as the "Test build" pre-release (replaces the last one)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          gh release delete test-latest --yes --cleanup-tag 2>/dev/null || true
+          git push --delete origin refs/tags/test-latest 2>/dev/null || true
+          printf 'Test build of commit %s, for trying out before a release. Not a release: the app never updates to it.\n\nDownload **%s** (installer) or the zip (portable).\n' \
+            "${GITHUB_SHA::7}" "AC8_Asset_Extractor_${TAG}_Setup.exe" > notes.md
+          gh release create test-latest "AC8_Asset_Extractor_${TAG}_Setup.exe" "AC8_Asset_Extractor_${TAG}.zip" \
+            --prerelease --latest=false --title "Test build (${GITHUB_SHA::7})" --notes-file notes.md --target "$GITHUB_SHA"
