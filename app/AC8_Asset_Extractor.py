@@ -2991,6 +2991,9 @@ class App(tk.Tk):
             btns.insert(0, ("Preview " + (f"first 30 of {len(meshes)} meshes" if len(meshes) > 30 else
                                           f"all {len(meshes)} mesh(es)"),
                             lambda: self.preview_meshes(meshes[:30], it["title"]), "default"))
+            if gname.startswith("Bosses") and len(meshes) > 1:  # one vehicle built from many meshes
+                btns.insert(0, ("Preview whole vehicle",
+                                lambda: self.preview_meshes(meshes, it["title"], together=True), "default"))
         types = {}
         for k in it["keys"]:
             t_ = asset_type(k.rsplit("/", 1)[-1])
@@ -3125,8 +3128,9 @@ class App(tk.Tk):
                 shutil.rmtree(d, ignore_errors=True)
         return freed / 1e6
 
-    def preview_meshes(self, mesh_keys, label):
-        """Unpack the meshes + their materials + textures into _Previews, convert to GLB, open the viewer."""
+    def preview_meshes(self, mesh_keys, label, together=False):
+        """Unpack the meshes + their materials + textures into _Previews, convert to GLB, open the viewer
+        (together: start on all the parts shown at once, e.g. a boss built from many meshes)."""
         mesh_keys = [k for k in mesh_keys if k]
         if not mesh_keys:
             return
@@ -3144,7 +3148,7 @@ class App(tk.Tk):
         have = {p.stem for p in glb.rglob("*.glb")} if glb.exists() else set()
         main = sorted(stems, key=lambda s_: (not s_.startswith("SK_"), len(s_)))[0]
         if all(s_ in have for s_ in stems):
-            self.open_viewer([glb], main)
+            self.open_viewer([glb], main, together)
             return
         paks = self._paks_dir()
         size = self.v_max_tex.get() or "0"
@@ -3198,7 +3202,7 @@ class App(tk.Tk):
             stamp.write_text(MESH_FORMAT)
             if not self.v_keep_previews.get():  # the viewer only needs the GLBs; drop the unpacked game files now
                 shutil.rmtree(raw, ignore_errors=True)
-            self.post("call", lambda: self.open_viewer([glb], main))
+            self.post("call", lambda: self.open_viewer([glb], main, together))
             return f"✔ Preview ready: {label}"
 
         self._start(work, "Preparing preview…")
@@ -3206,7 +3210,9 @@ class App(tk.Tk):
     def view_folder(self, folder):
         self.open_viewer([folder / FINAL_DIR_NAME / "Meshes"], None)
 
-    def open_viewer(self, paths, first=None):
+    ALL_PARTS = "*all parts*"  # Model dropdown value: every model in the list at once
+
+    def open_viewer(self, paths, first=None, together=False):
         files = []
         for p in paths:
             p = Path(p)
@@ -3217,10 +3223,24 @@ class App(tk.Tk):
         self._view_files, self._view_first = files, first
         self._log(f"Viewer: {len(files)} model(s)" + (f", starting with {first}" if first else ""))
         pick = next((f for f in files if f.stem == first), files[0])
-        self.dd_view_model.set_options([(str(f), f.stem) for f in files])
+        opts = [(str(f), f.stem) for f in files]
+        if len(files) > 1:
+            opts.insert(0, (self.ALL_PARTS, f"All parts together ({len(self._together_files(files))})"))
+        self.dd_view_model.set_options(opts)
+        if together and len(files) > 1:
+            pick = Path(self.ALL_PARTS)
         self.v_view_model.set(str(pick))
         self.show_tab("viewer")
         self._view_load(pick)
+
+    TOGETHER_SKIP = re.compile(r"_(dam|alt|temp|gearoff|refuelon)(_|$)", re.I)
+
+    def _together_files(self, files):
+        """The models to show as one: damaged / alternate versions left out, and an SM_ copy of an SK_ mesh."""
+        stems = {f.stem.lower() for f in files}
+        out = [f for f in files if not self.TOGETHER_SKIP.search(f.stem)
+               and not (f.stem.lower().startswith("sm_") and "sk_" + f.stem.lower()[3:] in stems)]
+        return out or files
 
     # ---------------------------------------------------------- native viewer
     def _ensure_glv(self):
@@ -3375,6 +3395,8 @@ class App(tk.Tk):
         self._view_token += 1
         tok = self._view_token
         self._view_fill_aircraft(path)
+        if str(path) == self.ALL_PARTS:
+            return self._view_load_together(tok, keep_camera)
         att = getattr(self, "_view_att", {})
         extras = [att.get(g, {}).get(v.get()) for g, v in (("gear", self.v_view_gear), ("probe", self.v_view_probe),
                                                           ("pylons", self.v_view_pylons))]
@@ -3396,6 +3418,33 @@ class App(tk.Tk):
                 SLOG.exc(f"Viewer: loading {path}")
                 m, st, err = None, None, e
             self.post("call", lambda: self._view_loaded(tok, path, m, st, err, keep_camera, spec))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _view_load_together(self, tok, keep_camera):
+        import ac8_glview
+        files = self._together_files(self._view_files)
+        self.v_view_status.set(f"Loading {len(files)} parts…")
+        path = Path(self.ALL_PARTS)
+
+        def work():
+            try:
+                models, cache = [], {}
+                for f in files:
+                    try:
+                        models.append(ac8_glview.load_glb(f, cache=cache))
+                    except Exception as e:
+                        SLOG.exc(f"Viewer: loading {f}")
+                        self.post("call", lambda n=f.name, e=e: self._log(f"  Viewer: skipped {n}: {e}", "warn"))
+                if not models:
+                    raise RuntimeError("none of the parts could be opened")
+                m = ac8_glview.merge_models(models[0], models[1:])
+                m.name = f"All parts ({len(models)})"
+                st, err = ac8_glview.model_stats(m), None
+            except Exception as e:
+                SLOG.exc("Viewer: loading all parts")
+                m, st, err = None, None, e
+            self.post("call", lambda: self._view_loaded(tok, path, m, st, err, keep_camera))
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -3546,9 +3595,12 @@ class App(tk.Tk):
             w.destroy()
         m = self._view_model
         groups = {}
+        by_model = str(self.v_view_model.get()) == self.ALL_PARTS and m.mat_src  # all parts: one entry per mesh
         for p in m.prims:
-            name = m.materials[p.mat].name
-            base = re.sub(r"\.10\d\d$", "", name)  # UDIM tiles of one material → one entry
+            if by_model:
+                base = m.mat_src[p.mat]
+            else:
+                base = re.sub(r"\.10\d\d$", "", m.materials[p.mat].name)  # UDIM tiles of one material → one entry
             groups.setdefault(base, set()).add(p.mat)
         self._view_part_vars, self._view_tex_vars, self._view_folds = {}, {}, {}
         self._view_thumb_imgs = []
@@ -3573,6 +3625,7 @@ class App(tk.Tk):
                 imgs = [m.materials[i].tex.get(role) for i in mats if m.materials[i].tex.get(role) in m.image_names]
                 if not imgs:
                     continue
+                more = len({re.sub(r"\.10\d\d$", "", m.image_names[i]) for i in imgs}) - 1
                 ntex += 1
                 tv = tk.BooleanVar(value=True)
                 self._view_tex_vars[(name, role)] = (tv, set(mats))
@@ -3580,7 +3633,8 @@ class App(tk.Tk):
                 tr.pack(fill="x", padx=(30, 6), pady=(0, 4))
                 Check(tr, tv, "", bg=C["bg2"], command=self._view_tex_changed).pack(side="left")
                 tex_name = re.sub(r"\.10\d\d$", "", m.image_names[imgs[0]])
-                extra = f"  (+{len(set(imgs)) - 1} tiles)" if len(set(imgs)) > 1 else ""
+                extra = f"  (+{more} more)" if more else \
+                    f"  (+{len(set(imgs)) - 1} tiles)" if len(set(imgs)) > 1 else ""
                 tk.Label(tr, text=label, bg=C["bg2"], fg=C["text3"], font=F["small"], width=11, anchor="w").pack(
                     side="left", padx=(6, 0))
                 lbl = tk.Label(tr, text=f"{tex_name}{extra}", bg=C["bg2"], fg=C["text2"], font=F["mono_s"],
@@ -4507,7 +4561,7 @@ class App(tk.Tk):
         if self.viewer_srv is None:
             import ac8_viewer
             self.viewer_srv = ac8_viewer.ViewerServer()
-        cur = Path(self.v_view_model.get()) if self.v_view_model.get() else None
+        cur = Path(self.v_view_model.get()) if self.v_view_model.get() not in ("", self.ALL_PARTS) else None
         self.viewer_srv.set_files(self._view_files, cur.stem if cur else self._view_first)
         webbrowser.open(self.viewer_srv.url)
 

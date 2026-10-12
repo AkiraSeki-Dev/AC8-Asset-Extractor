@@ -6,6 +6,7 @@ Elsewhere: renders off-screen (EGL) and shows the frames in a Tk image — same 
     load_glb(path)       -> Model   (CPU only, safe in a worker thread)
     GLView(parent, ...)             Tk widget; view.set_model(model), view.opts, view.request()
 """
+import hashlib
 import io
 import json
 import math
@@ -108,9 +109,11 @@ class Model:
         self.ibm = None        # (n, 4, 4)
         self.skinned_nodes = set()
         self.lo = self.hi = np.zeros(3)
+        self.mat_src = None    # after merge_models: source model name per material
 
 
-def load_glb(path, max_texture=MAX_VIEW_TEXTURE):
+def load_glb(path, max_texture=MAX_VIEW_TEXTURE, cache=None):
+    """cache: a dict shared between loads so a texture several GLBs carry is decoded (and later uploaded) once."""
     from PIL import Image
     with open(path, "rb") as fh:
         data = fh.read()
@@ -180,9 +183,13 @@ def load_glb(path, max_texture=MAX_VIEW_TEXTURE):
                 f"image {ii}"
             if "bufferView" in im:
                 raw, _ = view_bytes(im["bufferView"])
-                img = Image.open(io.BytesIO(raw))
+                key = hashlib.blake2b(raw, digest_size=16).digest()
             else:
-                img = Image.open(os.path.join(os.path.dirname(path), im["uri"]))
+                raw, key = None, os.path.abspath(os.path.join(os.path.dirname(path), im["uri"]))
+            if cache is not None and key in cache:
+                m.image_sizes[ii], m.thumbs[ii], m.images[ii] = cache[key]
+                continue
+            img = Image.open(io.BytesIO(raw) if raw is not None else key)
             img = img.convert("RGBA")
             m.image_sizes[ii] = img.size
             th = img.copy()
@@ -191,6 +198,8 @@ def load_glb(path, max_texture=MAX_VIEW_TEXTURE):
             if max_texture and max(img.size) > max_texture:
                 img.thumbnail((max_texture, max_texture))
             m.images[ii] = np.asarray(img, np.uint8)
+            if cache is not None:
+                cache[key] = (m.image_sizes[ii], m.thumbs[ii], m.images[ii])
         except Exception:
             pass
 
@@ -311,16 +320,27 @@ def merge_models(main, extras):
     """Show several GLBs as one model (airframe + landing gear + refuel probe …). The extra parts are posed
     statically (their own skeletons stay in the rest pose); their materials keep their names, so a livery that
     re-textures the airframe's materials re-textures them too."""
+    if main.mat_src is None:
+        main.mat_src = [main.name] * len(main.materials)
+    have = {id(v): i for i, v in main.images.items()}  # textures shared through load_glb's cache: keep one copy
     for k, ex in enumerate(extras, 1):
         mo, io = len(main.materials), 100000 * k
         world = node_worlds(ex, {})
+        remap = {}
+        for i, v in ex.images.items():
+            if id(v) in have:
+                remap[i] = have[id(v)]
+            else:
+                remap[i] = have[id(v)] = i + io
+                main.images[i + io], main.image_names[i + io] = v, ex.image_names.get(i, f"image {i}")
+                main.image_sizes[i + io], main.thumbs[i + io] = ex.image_sizes.get(i), ex.thumbs.get(i)
+        for i, v in ex.image_names.items():  # images that failed to decode: keep their names
+            if i not in remap:
+                main.image_names[i + io] = v
         for mat in ex.materials:
-            mat.tex = {r: i + io for r, i in mat.tex.items()}
+            mat.tex = {r: remap.get(i, i + io) for r, i in mat.tex.items()}
             main.materials.append(mat)
-        for d_src, d_dst in ((ex.images, main.images), (ex.image_names, main.image_names),
-                             (ex.image_sizes, main.image_sizes), (ex.thumbs, main.thumbs)):
-            for i, v in d_src.items():
-                d_dst[i + io] = v
+            main.mat_src.append(ex.name)
         for p in ex.prims:
             if p.node is not None and p.node not in ex.skinned_nodes:
                 w = world[p.node]

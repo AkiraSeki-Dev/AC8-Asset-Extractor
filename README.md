@@ -61,6 +61,7 @@ Open it with **View 3D** on an extraction or **Preview** in the catalog.
 | Fly | **W A S D**, **Space** up, **Ctrl** down, hold **Shift** for speed |
 | Field of view | **Alt + mouse wheel** |
 
+- **Model → All parts together** shows every mesh in the list at once (damaged / alternate versions left out), e.g. a boss built from many parts. In the catalog, bosses have **Preview whole vehicle**.
 - **Aircraft panel** (top right of the view): pick a **Livery** and attach the **Gear**, **Probe** and **Pylons**.
   **Edit livery** changes the numbers, emblems and colours; **Save as…** keeps your version.
 - **Export textures…** (top bar) saves the model's textures with the livery baked in, in the PBR layout and size you
