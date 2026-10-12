@@ -1,0 +1,107 @@
+# A build to try out before releasing: push to the test-build branch (or run it from the Actions tab) and
+# download "AC8 Asset Extractor test build" from the run's Artifacts section. Same files as a release
+# (portable zip + Setup.exe), but nothing is published and the app's updater never sees it.
+name: Test build
+
+on:
+  push:
+    branches: [test-build]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the version
+        id: ver
+        run: |
+          v=$(python3 -c "import re; print(re.search(r'APP_VERSION = \"([^\"]+)\"', open('app/AC8_Asset_Extractor.py', encoding='utf-8').read()).group(1))")
+          short=$(git rev-parse --short HEAD)
+          echo "tag=v$v-test-$short" >> "$GITHUB_OUTPUT"
+          echo "short=$short" >> "$GITHUB_OUTPUT"
+
+      - name: Check the code
+        run: python3 -m py_compile app/*.py "AC8 Unpacker/ac8_unpack.py"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: false  # the launcher has no dependencies
+
+      - name: Build the launcher
+        working-directory: launcher
+        run: GOOS=windows GOARCH=amd64 go build -ldflags "-H windowsgui -s -w" -o "../AC8 Asset Extractor.exe" .
+
+      - name: Bundle retoc and repak (trumank, MIT)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "AC8 Unpacker/tools"
+          echo "{" > "AC8 Unpacker/tools/versions.json"
+          sep=""
+          for t in retoc repak; do
+            tag=$(gh release view --repo "trumank/$t" --json tagName -q .tagName)
+            gh release download "$tag" --repo "trumank/$t" --pattern "*x86_64-pc-windows-msvc.zip" --dir "/tmp/$t"
+            unzip -o -j /tmp/$t/*.zip "*$t.exe" -d "AC8 Unpacker/tools"
+            printf '%s "%s": "%s"\n' "$sep" "$t" "${tag#v}" >> "AC8 Unpacker/tools/versions.json"
+            sep=","
+          done
+          echo "}" >> "AC8 Unpacker/tools/versions.json"
+          cat "AC8 Unpacker/tools/versions.json"
+
+      - name: Package
+        env:
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          mkdir -p "/tmp/pkg/AC8 Asset Extractor"
+          # only what the app needs to run (plus the licence / notice files the bundled tools and font require);
+          # the launcher's source and the READMEs stay in the repo
+          tar cf - --exclude=./.git --exclude=./.github --exclude=./.gitignore --exclude=./launcher --exclude=./installer \
+            --exclude=./README.md "--exclude=./AC8 Unpacker/README.md" --exclude=notes.md --exclude=__pycache__ . \
+            | tar xf - -C "/tmp/pkg/AC8 Asset Extractor"
+          (cd /tmp/pkg && zip -qr "$GITHUB_WORKSPACE/AC8_Asset_Extractor_${TAG}.zip" "AC8 Asset Extractor")
+
+      - name: Build the installer (own Python, no admin)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          # a full, relocatable CPython for Windows that includes Tkinter (the embeddable package doesn't)
+          gh release download --repo astral-sh/python-build-standalone \
+            --pattern "cpython-3.12.*-x86_64-pc-windows-msvc-install_only_stripped.tar.gz" --dir /tmp/pbs \
+          || gh release download --repo astral-sh/python-build-standalone \
+            --pattern "cpython-3.12.*-x86_64-pc-windows-msvc-install_only.tar.gz" --dir /tmp/pbs
+          ls /tmp/pbs
+          mkdir -p /tmp/inst
+          cp -r "/tmp/pkg/AC8 Asset Extractor/." /tmp/inst/
+          tar xzf /tmp/pbs/*.tar.gz -C /tmp/inst            # -> /tmp/inst/python/
+          test -f /tmp/inst/python/python.exe
+          # the app's packages, as Windows wheels for Python 3.12 (not compiled here: wrong Python version)
+          python3 -m pip install --quiet --no-compile --target /tmp/inst/python/Lib/site-packages \
+            --platform win_amd64 --python-version 3.12 --implementation cp --only-binary=:all: \
+            numpy Pillow pycryptodome PyOpenGL pyopengltk
+          rm -rf /tmp/inst/python/Lib/site-packages/bin /tmp/inst/python/Lib/test /tmp/inst/python/Lib/idlelib \
+                 /tmp/inst/python/include
+          find /tmp/inst/python -name __pycache__ -type d -prune -exec rm -rf {} +
+          du -sh /tmp/inst/python
+          sudo apt-get install -y -q nsis >/dev/null
+          v="${TAG#v}"
+          # Windows wants exactly four numbers for the file version: 1.2 -> 1.2.0.0, 1.2.1 -> 1.2.1.0
+          v4=$(python3 -c "import sys; p=(sys.argv[1].split('.') + ['0']*4)[:4]; print('.'.join(p))" "${v%%-*}")
+          makensis -V2 -DVERSION="$v" -DVERSION4="$v4" -DSRC=/tmp/inst \
+            "-DOUT=$GITHUB_WORKSPACE/AC8_Asset_Extractor_${TAG}_Setup.exe" installer/ac8.nsi
+          ls -la "$GITHUB_WORKSPACE/AC8_Asset_Extractor_${TAG}_Setup.exe"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AC8 Asset Extractor test build (${{ steps.ver.outputs.short }})
+          path: |
+            AC8_Asset_Extractor_*_Setup.exe
+            AC8_Asset_Extractor_*.zip
+          retention-days: 14
+          compression-level: 0
