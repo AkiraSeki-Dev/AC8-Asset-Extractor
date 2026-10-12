@@ -55,10 +55,13 @@ Open it with **View 3D** on an extraction or **Preview** in the catalog.
 
 | Action | How |
 | --- | --- |
-| Orbit / pan | left-drag / right-drag |
+| Orbit | middle-drag (or left-drag) |
+| Pan | **Shift** + middle-drag (or right-drag) |
 | Zoom | mouse wheel |
 | Frame the model | **F** or double-click |
-| Fly | **W A S D**, **Space** up, **Ctrl** down, hold **Shift** for speed |
+| Free fly on / off | **Ctrl + F** or **Shift + `** (Esc also stops) |
+| Free fly | move the mouse to look, **W A S D** move, **Q** down, **E** up, wheel forward/back |
+| Fly speed | **Shift + mouse wheel** |
 | Field of view | **Alt + mouse wheel** |
 
 - **Model → All parts together** shows every mesh in the list at once (damaged / alternate versions left out), e.g. a boss built from many parts. In the catalog, bosses have **Preview whole vehicle**.

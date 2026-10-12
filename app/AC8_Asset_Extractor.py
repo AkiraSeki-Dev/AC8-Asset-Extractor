@@ -2587,6 +2587,8 @@ class App(tk.Tk):
     # ================================================================== tabs
 
     def show_tab(self, key):
+        if key != "viewer" and self.glv is not None:
+            self.glv.set_fly(False)
         panes = {"assets": self.pane_assets, "catalog": self.pane_catalog, "textures": self.pane_textures,
                  "viewer": self.pane_viewer}
         new = panes[key]
@@ -3280,6 +3282,7 @@ class App(tk.Tk):
             return None
         self.glv = ac8_glview.GLView(self.view_host, bg=C["bg0"], on_error=self._view_fail,
                                      on_ready=self._view_ready)
+        self.glv.on_fly = self._view_fly_changed
         return self.glv
 
     def _view_ready(self, r):
@@ -4001,13 +4004,42 @@ class App(tk.Tk):
         except Exception as e:
             messagebox.showerror(APP_NAME, f"Couldn't save the screenshot:\n{e}")
 
+    FLY_HELP = "Free fly: move the mouse to look · W A S D move · Q down · E up · wheel forward/back · " \
+               "Shift+wheel speed · Alt+wheel field of view · Ctrl+F or Esc to stop"
+
     def _view_key(self, e):
         if self.tab != "viewer" or isinstance(self.focus_get(), tk.Entry) or self.glv is None:
             return
-        if self.glv.key_down(e.keysym):  # WASD / Space / Ctrl / Q E: fly the camera
+        ks = e.keysym.lower()
+        ctrl, shift = e.state & 0x0004, e.state & 0x0001
+        tilde = ks in ("asciitilde", "~") or (shift and (ks in ("grave", "`") or (IS_WIN and e.keycode == 192)))
+        if (ctrl and ks == "f") or tilde:  # Ctrl+F / Shift+` (192: the key left of 1 on Windows, any layout)
+            self.glv.toggle_fly()
             return "break"
-        if e.keysym.lower() == "f":
+        if ks == "escape" and self.glv.fly:
+            self.glv.set_fly(False)
+            return "break"
+        if self.glv.key_down(e.keysym):  # free fly: W A S D Q E (Shift faster)
+            return "break"
+        if ks == "f" and not ctrl:
             self.glv.frame()
+
+    def _view_fly_changed(self, on):
+        self.v_view_status.set(self.FLY_HELP if on else "Free fly off  ·  Ctrl+F (or Shift+`) to fly again")
+
+    def _view_focus_out(self, e):
+        if self.glv is None:
+            return
+        self.glv.keys_released()
+
+        def check():  # the app itself lost focus (another window): stop free fly so the mouse isn't held
+            try:
+                gone = self.focus_get() is None
+            except (KeyError, tk.TclError):
+                gone = False
+            if gone and self.glv is not None:
+                self.glv.set_fly(False)
+        self.after(100, check)
 
     def _view_key_up(self, e):
         if self.glv is not None and self.glv.key_up(e.keysym):
@@ -4068,8 +4100,10 @@ class App(tk.Tk):
         self.view_panel_seg = Segmented(seg_row, self.v_view_panel, [("parts", "Parts"), ("bones", "Bones"),
                                                                    ("info", "Info")])
         self.view_panel_seg.pack(side="left")
-        tk.Label(inner, text="Left-drag rotate · right-drag pan · wheel zoom\nW A S D move · Space up · Ctrl down · Shift faster\n"
-                 "Shift+wheel fly speed · Alt+wheel field of view · F frame",
+        tk.Label(inner, text="Middle-drag rotate · Shift+middle-drag pan · wheel zoom · F frame\n"
+                 "(left-drag rotates and right-drag pans too)\n"
+                 "Ctrl+F or Shift+` free fly: mouse look · W A S D · Q down · E up\n"
+                 "Shift+wheel fly speed · Alt+wheel field of view",
                  bg=C["bg1"], fg=C["text3"], font=F["small"], justify="left", anchor="w").pack(side="bottom",
                                                                                                 fill="x", pady=(8, 0))
         host = tk.Frame(inner, bg=C["bg1"])
@@ -4151,7 +4185,7 @@ class App(tk.Tk):
         self._build_aircraft_overlay(box)
         self.bind("<KeyPress>", self._view_key, add=True)
         self.bind("<KeyRelease>", self._view_key_up, add=True)
-        self.bind("<FocusOut>", lambda e: self.glv and self.glv.keys_released(), add=True)
+        self.bind("<FocusOut>", self._view_focus_out, add=True)
 
     # ---------------------------------------------------------- aircraft overlay (top-right of the 3D view)
     EMBLEM_SLOTS = [("TailLeft", "Tail, left"), ("TailRight", "Tail, right"), ("WingLeft", "Wing top, left"),

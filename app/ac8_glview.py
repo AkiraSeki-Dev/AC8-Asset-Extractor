@@ -971,6 +971,18 @@ class Camera:
         k = 2 * self.dist * math.tan(math.radians(self.fov) / 2) / max(h, 1)
         self.target = self.target - right * dx * k + up * dy * k
 
+    def look(self, dx, dy, k=0.003):
+        """Free fly: turn the camera where it stands (mouse right = turn right, mouse down = look down)."""
+        eye = self.eye()
+        self.yaw -= dx * k
+        self.pitch = min(max(self.pitch + dy * k, -1.55), 1.55)
+        cp = math.cos(self.pitch)
+        self.target = eye - self.dist * np.array([cp * math.sin(self.yaw), math.sin(self.pitch), cp * math.cos(self.yaw)])
+
+    def forward(self):
+        f = self.target - self.eye()
+        return f / max(float(np.linalg.norm(f)), 1e-9)
+
     def zoom(self, steps):
         """Dolly: move closer / further from the point being looked at (the field of view stays the same)."""
         self.dist = min(max(self.dist * (0.88 ** steps), self.radius * 0.002, 1e-3), self.radius * 60)
@@ -1570,12 +1582,21 @@ class _ViewMixin:
         self.failed = ""
         self._keys, self._key_rel_jobs, self._fly_job, self._fly_last = set(), {}, None, 0.0
         self.fly_speed = 1.0
+        self.fly = False          # free fly: mouse turns the camera, W A S D Q E move it
+        self.on_fly = None        # called with True / False when free fly turns on / off
+        self._mw = None
+        self._center = None
 
     def _bind_mouse(self, w):
+        # Blender style: middle-drag orbit, Shift+middle-drag pan, wheel zoom (left-drag orbit and right-drag pan
+        # too, for mice / touchpads without a usable middle button)
+        self._mw = w
         w.bind("<ButtonPress-1>", lambda e: self._press(e, "orbit"))
-        w.bind("<ButtonPress-2>", lambda e: self._press(e, "pan"))
+        w.bind("<ButtonPress-2>", lambda e: self._press(e, "orbit"))
         w.bind("<ButtonPress-3>", lambda e: self._press(e, "pan"))
         w.bind("<Shift-ButtonPress-1>", lambda e: self._press(e, "pan"))
+        w.bind("<Shift-ButtonPress-2>", lambda e: self._press(e, "pan"))
+        w.winfo_toplevel().bind("<Motion>", self._fly_look, add="+")
         for b in (1, 2, 3):
             w.bind(f"<B{b}-Motion>", self._motion)
             w.bind(f"<ButtonRelease-{b}>", lambda e: setattr(self, "_drag", None))
@@ -1583,6 +1604,8 @@ class _ViewMixin:
         w.bind("<Double-Button-1>", lambda e: self.frame())
 
     def _press(self, e, kind):
+        if self.fly:
+            return
         self._drag = (kind, e.x, e.y)
         try:
             e.widget.focus_set()
@@ -1602,23 +1625,87 @@ class _ViewMixin:
         self.request()
 
     def _wheel(self, steps):
-        if self.r is not None:
-            self.r.cam.zoom(steps)
-            self.request()
+        if self.r is None:
+            return
+        cam = self.r.cam
+        if self.fly:  # move forward / back along the view
+            cam.target = cam.target + cam.forward() * steps * max(cam.radius, 0.5) * 0.12 * self.fly_speed
+        else:
+            cam.zoom(steps)
+        self.request()
 
-    # ---------------------------------------------------------- free-fly keys (WASD, Space up, Ctrl down, Shift fast)
-    FLY_KEYS = {"w": "w", "a": "a", "s": "s", "d": "d", "space": "up", "control_l": "down", "control_r": "down",
-                "shift_l": "fast", "shift_r": "fast", "q": "down", "e": "up"}
+    # ---------------------------------------------------------- free fly (Ctrl+F / Shift+`)
+    FLY_KEYS = {"w": "w", "a": "a", "s": "s", "d": "d", "q": "down", "e": "up", "shift_l": "fast", "shift_r": "fast"}
+
+    def set_fly(self, on):
+        on = bool(on) and self.r is not None and self._mw is not None
+        if on == self.fly:
+            return
+        self.fly = on
+        self._drag = None
+        w = self._mw
+        if on:
+            self._anchor_near()
+            try:
+                w.configure(cursor="none")
+                w.focus_set()
+            except Exception:
+                pass
+            self._warp_center()
+        else:
+            self._keys.clear()
+            self._center = None
+            try:
+                w.configure(cursor="")
+            except Exception:
+                pass
+            self._aim_at_model()
+            self.request()
+        if self.on_fly:
+            self.on_fly(on)
+
+    def toggle_fly(self):
+        self.set_fly(not self.fly)
+        return self.fly
+
+    def _warp_center(self):
+        w = self._mw
+        cx, cy = max(w.winfo_width(), 2) // 2, max(w.winfo_height(), 2) // 2
+        self._center = (w.winfo_rootx() + cx, w.winfo_rooty() + cy)
+        try:
+            w.event_generate("<Motion>", warp=True, x=cx, y=cy)
+        except Exception:
+            pass
+
+    def _fly_look(self, e):
+        if not self.fly or self._center is None or self.r is None:
+            return
+        dx, dy = e.x_root - self._center[0], e.y_root - self._center[1]
+        if not dx and not dy:
+            return
+        self.r.cam.look(dx, dy)
+        self._warp_center()
+        self.request()
+
+    def _aim_at_model(self):
+        """Leaving free fly: keep the view, but put the turning point back in front of the camera at the model's
+        distance, so orbiting turns around the model again."""
+        cam = self.r.cam
+        eye, fwd = cam.eye(), cam.forward()
+        m = self.r.model
+        centre = (np.asarray(m.lo) + np.asarray(m.hi)) / 2 if m is not None else cam.target
+        d = float((centre - eye) @ fwd)
+        if d < cam.radius * 0.25:
+            d = max(cam.radius * 0.5, 0.5)
+        cam.target, cam.dist = eye + fwd * d, d
 
     def key_down(self, keysym):
         k = self.FLY_KEYS.get(keysym.lower())
-        if k is None or self.r is None:
+        if k is None or self.r is None or not self.fly:
             return False
         job = self._key_rel_jobs.pop(k, None)
         if job:
             self.after_cancel(job)  # X11 key repeat sends release+press pairs: ignore the release
-        if not (self._keys - {"fast"}) and k != "fast":
-            self._anchor_near()
         self._keys.add(k)
         if self._fly_job is None:
             self._fly_last = time.time()
@@ -1627,7 +1714,7 @@ class _ViewMixin:
 
     def key_up(self, keysym):
         k = self.FLY_KEYS.get(keysym.lower())
-        if k is None:
+        if k is None or not self.fly:
             return False
         self._key_rel_jobs[k] = self.after(30, lambda: (self._keys.discard(k), self._key_rel_jobs.pop(k, None)))
         return True
@@ -1684,6 +1771,7 @@ class _ViewMixin:
         return self.r.cam.fov
 
     def frame(self):
+        self.set_fly(False)
         if self.r and self.r.model is not None:
             self.r.cam.frame(self.r.model.lo, self.r.model.hi)
             self.request()
@@ -1692,6 +1780,8 @@ class _ViewMixin:
         if self.r is None:
             self._pending_model = (model, livery)
             return
+        if not keep_camera:
+            self.set_fly(False)
         self._make_current()
         self.r.set_model(model, keep_camera=keep_camera)
         if livery:
