@@ -1,10 +1,18 @@
-# Push a tag like v2.39 (matching APP_VERSION in AC8_Asset_Extractor.py) to publish a release.
-# The app's updater (Settings → APP → Check for updates) downloads the zip attached here.
+# Publish a GitHub release tagged like v2.39 (matching APP_VERSION in AC8_Asset_Extractor.py), e.g.
+#   gh release create v2.39 --target main --title "AC8 Asset Extractor v2.39" --notes "…"
+# or run this workflow by hand (Actions → Release → Run workflow) with the tag. It builds the launcher, bundles
+# retoc and repak, and attaches AC8_Asset_Extractor_vX.Y.zip to the release — the file the app's updater
+# (Settings → APP → Check for updates) downloads.
 name: Release
 
 on:
-  push:
-    tags: ["v*"]
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, e.g. v2.39"
+        required: true
 
 permissions:
   contents: write
@@ -12,8 +20,12 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
 
       - uses: actions/setup-go@v5
         with:
@@ -23,7 +35,7 @@ jobs:
         run: |
           python3 -m py_compile *.py "AC8 Unpacker/ac8_unpack.py"
           v=$(python3 -c "import re; print(re.search(r'APP_VERSION = \"([^\"]+)\"', open('AC8_Asset_Extractor.py', encoding='utf-8').read()).group(1))")
-          if [ "v$v" != "$GITHUB_REF_NAME" ]; then echo "APP_VERSION is $v but the tag is $GITHUB_REF_NAME"; exit 1; fi
+          if [ "v$v" != "$TAG" ]; then echo "APP_VERSION is $v but the tag is $TAG"; exit 1; fi
 
       - name: Build the launcher
         working-directory: launcher
@@ -50,13 +62,18 @@ jobs:
         run: |
           mkdir -p "/tmp/pkg/AC8 Asset Extractor"
           tar cf - --exclude=./.git --exclude=./.github --exclude=./.gitignore . | tar xf - -C "/tmp/pkg/AC8 Asset Extractor"
-          (cd /tmp/pkg && zip -qr "$GITHUB_WORKSPACE/AC8_Asset_Extractor_${GITHUB_REF_NAME}.zip" "AC8 Asset Extractor")
-          python3 .github/scripts/release_notes.py "$GITHUB_REF_NAME" > notes.md
+          (cd /tmp/pkg && zip -qr "$GITHUB_WORKSPACE/AC8_Asset_Extractor_${TAG}.zip" "AC8 Asset Extractor")
+          python3 .github/scripts/release_notes.py "$TAG" > notes.md
           cat notes.md
 
-      - name: Publish the release
+      - name: Attach the zip to the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" "AC8_Asset_Extractor_${GITHUB_REF_NAME}.zip" \
-            --title "AC8 Asset Extractor $GITHUB_REF_NAME" --notes-file notes.md
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "AC8_Asset_Extractor_${TAG}.zip" --clobber
+            gh release edit "$TAG" --notes-file notes.md
+          else
+            gh release create "$TAG" "AC8_Asset_Extractor_${TAG}.zip" \
+              --title "AC8 Asset Extractor $TAG" --notes-file notes.md --target "$GITHUB_SHA"
+          fi
