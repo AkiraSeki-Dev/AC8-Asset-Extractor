@@ -162,44 +162,34 @@ with older versions), **Raw** and **Final** buttons. Click a card to select it (
 
 ### 3D viewer
 
-The viewer is part of the app: the **3D Viewer** tab draws the model itself with OpenGL on your graphics card
-(no browser, no extra window). It takes the full width while you're on it: the display controls are in the bar
-above the view (**Model**, shading, **Map**, Wireframe / Skeleton / Grid, background), and the sidebar on the
-right has **Parts**, **Bones** and **Info**. Needs PyOpenGL + pyopengltk (Settings › Install packages) and a graphics driver with OpenGL 3.3, which
-any PC from the last ~12 years has. **Open in browser** still shows the same model in the web viewer if you
-ever want that.
+The **3D Viewer** tab draws the model with your graphics card (needs PyOpenGL + pyopengltk from Settings → Install
+packages, and OpenGL 3.3). **Open in browser** shows the same model in a web viewer instead.
 
-Orbit (left-drag), pan (right-drag or Shift+left-drag), zoom (mouse wheel), **F** or double-click to frame.
-Fly around with **W A S D** (forward / left / back / right), **Space** up, **Ctrl** down, hold **Shift** to go
-faster — handy inside cockpits and big environment pieces. Shading: lit,
-colour only, normals, clay; wireframe, skeleton, grid, background colour.
-**Parts** lists every material on the model; open one with its arrow (all start folded — **Expand all** /
-**Collapse all**) to see the textures it uses (Colour / Normal / Metal-Rough), so you can check a part is using
-the right ones: tick a part to show/hide it (**only** = show just that one), tick
-a texture to switch just that texture off, and click a texture's name to see it in the preview box and switch the
-view to that map. **Map** paints every part with only its colour, normal or metal/rough/AO map (parts that
-don't have that map show a dark checkerboard).
-**Aircraft** (floating panel, top-right of the view, for jets — **hide** folds it away): **Livery** switches between every paint scheme the game has for that aircraft —
-its colour / metal-rough / normal textures, the **emblems** it puts on the tails, wings and nose (the game places
-them on the aircraft's second UV set, in fixed slots: TailLeft/Right, WingLeft/Right, WingBottomLeft/Right,
-FrontBodyLeft/Right, Add01Left/Right), and custom **paint** (a mask texture whose red / green / blue areas are painted
-with the livery's Layer01–03 colours; shown approximately). Tail colours like a white fin with a black tip are
-painted into the livery's own colour texture, so they appear as soon as you pick that livery. Liveries need the
-whole aircraft folder extracted (the app also unpacks the emblems they use from the shared emblem folders). Aircraft
-numbers ("203") are drawn too: every livery sets its three digits (`Number01–03_Select`), the font, size and
-colour for the tail, nose and wing numbers, and the app draws them from the game's digit sheet
-(`T_Aircraft_Number`, unpacked automatically; a built-in font stands in until it's there). Placement, spacing and slant
-follow the game's own livery shader, so they sit where they do in game. **Gear** (down / up), **Probe** (stowed /
-extended) and **Weapon pylons** (set 1–6) attach those parts to the airframe — they're separate meshes in the game.
-**Edit livery** (in the panel): change the number (digits, which areas show it, size, height, position, colour,
-font), put any extracted emblem in any slot and size it, recolour the paint layers, and swap the colour texture —
-e.g. Queen's orange tail is simply a different colour texture (`T_…_007q_C`) from the black-tailed Joker one.
-**Save as…** keeps it as a custom livery (★ in the list, stored in `Liveries\<aircraft>.json`); **Reset** undoes.
-Free-fly extras: **Shift+wheel** changes the WASD fly speed, **Alt+wheel** narrows / widens the field of view.
-**Bones** poses the skeleton — pick a bone and turn it with the sliders (gear doors, flaps, airbrakes, swing wings…).
-**Info** shows vertex/triangle counts, materials, textures, bones and real-world size. **Screenshot** saves a PNG
-next to the model (twice the on-screen size). With several models (View 3D on an extraction), pick one in
-**Model**.
+**Controls**
+
+| Action | How |
+| --- | --- |
+| Orbit / pan | left-drag / right-drag (or Shift+left-drag) |
+| Zoom | mouse wheel |
+| Frame the model | **F** or double-click |
+| Fly | **W A S D**, **Space** up, **Ctrl** down, hold **Shift** for speed |
+| Fly speed / field of view | **Shift+wheel** / **Alt+wheel** |
+
+**Top bar:** pick the **Model**, the shading (lit, colour, normals, clay), a **Map** (colour, normal or
+metal/rough/AO only), wireframe, skeleton, grid and background. **Screenshot** saves a PNG next to the model;
+**Export textures…** writes the model's textures in any PBR preset.
+
+**Sidebar:**
+- **Parts:** show or hide each material, switch single textures off, and click a texture to preview it.
+- **Bones:** pose the skeleton with sliders (gear doors, flaps, swing wings…).
+- **Info:** vertex and triangle counts, materials, textures, bones and real-world size.
+
+**Aircraft panel** (top-right of the view, on jets):
+- **Livery:** every paint scheme the game has, with its emblems and tail / nose / wing numbers placed the way the
+  game does. Needs the whole aircraft folder extracted.
+- **Gear**, **Probe** and **Pylons:** attach those parts. Aircraft open with gear down and probe stowed.
+- **Edit livery:** change the numbers, emblems, paint colours and colour texture, then **Save as…** a custom livery
+  (★ in the list) or **Reset**.
 
 ## Features
 
