@@ -1,0 +1,20 @@
+# built / downloaded (the release workflow adds them to the zip)
+AC8 Asset Extractor.exe
+AC8 Asset Extractor.exe.old
+AC8 Unpacker/tools/*.exe
+AC8 Unpacker/tools/*.dll
+AC8 Unpacker/tools/versions.json
+AC8 Unpacker/tools/*-LICENSE*
+
+# your own data — never commit
+AC8 Unpacker/aes-key.txt
+ac8_extractor_settings.json
+asset_index.txt
+asset_history.json
+AC8_Exports/
+logs/
+Logs/
+output.txt
+__pycache__/
+*.pyc
+*.new

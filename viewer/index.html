@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AC8 Model Viewer</title>
+<style>
+  @font-face { font-family: "Outfit"; src: url("/fonts/Outfit-Regular.ttf"); font-weight: 400; }
+  @font-face { font-family: "Outfit"; src: url("/fonts/Outfit-Bold.ttf"); font-weight: 600; }
+  :root {
+    --bg-0: #0c0c0e; --bg-1: #121215; --bg-2: #18181c; --bg-3: #202026;
+    --border-1: #1f1f25; --border-2: #2a2a32; --border-3: #3a3a44;
+    --text-1: #e8e8ed; --text-2: #a3a3ad; --text-3: #6c6c78;
+    --accent: #e63c2d; --accent-cc: #e63c2dcc; --accent-tint: #2a1412; --ok: #3ecf6e;
+    --font: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg-0); color: var(--text-1); font: 13px var(--font); overflow: hidden; }
+  header { height: 56px; display: flex; align-items: center; gap: 10px; padding: 0 14px; background: var(--bg-1);
+           border-bottom: 1px solid var(--border-1); }
+  header img { height: 34px; }
+  .brand { line-height: 1.05; margin-right: 10px; }
+  .brand b { display: block; font-size: 15px; letter-spacing: .02em; }
+  .brand span { color: var(--accent); font-size: 10px; font-weight: 600; letter-spacing: .12em; }
+  select, button { font: inherit; color: var(--text-1); background: var(--bg-2); border: 1px solid var(--border-2);
+                   padding: 6px 11px; cursor: pointer; }
+  select { max-width: 340px; }
+  button:hover, select:hover { background: var(--bg-3); border-color: var(--border-3); }
+  button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .sep { width: 1px; height: 24px; background: var(--border-2); margin: 0 2px; }
+  .grow { flex: 1; }
+  main { position: absolute; top: 56px; bottom: 0; left: 0; right: 0; display: flex; }
+  aside { width: 300px; background: var(--bg-1); border-right: 1px solid var(--border-1); display: flex; flex-direction: column; }
+  .tabs { display: flex; border-bottom: 1px solid var(--border-1); }
+  .tabs button { flex: 1; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--text-3);
+                 padding: 10px 0; font-weight: 600; letter-spacing: .06em; font-size: 11px; }
+  .tabs button.on { color: var(--text-1); border-bottom-color: var(--accent); background: none; }
+  .pane { flex: 1; overflow: auto; padding: 10px 12px; display: none; }
+  .pane.on { display: block; }
+  .row { display: flex; align-items: center; gap: 8px; padding: 5px 4px; border-bottom: 1px solid var(--border-1); cursor: pointer; }
+  .row:hover { background: var(--bg-2); }
+  .row .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .meta { color: var(--text-3); font-size: 11px; }
+  .row.sel { background: var(--accent-tint); }
+  input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .label { color: var(--text-2); font-size: 11px; font-weight: 600; letter-spacing: .08em; margin: 10px 0 6px; }
+  .kv { display: grid; grid-template-columns: 100px 1fr; gap: 5px 8px; }
+  .kv div:nth-child(odd) { color: var(--text-3); }
+  .slider { margin: 6px 0 10px; }
+  .slider span { color: var(--text-3); font-size: 11px; }
+  #view { flex: 1; position: relative; }
+  canvas { display: block; }
+  #status { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); color: var(--text-2);
+            background: var(--bg-1); border: 1px solid var(--border-2); padding: 12px 18px; }
+  #status.err { color: var(--accent); border-color: var(--accent); }
+  #hint { position: absolute; right: 12px; bottom: 10px; color: var(--text-3); font-size: 11px; pointer-events: none; }
+  .small { font-size: 11px; color: var(--text-3); }
+  .btnrow { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
+  .btnrow button { padding: 4px 9px; font-size: 12px; }
+</style>
+<script type="importmap">
+  { "imports": { "three": "/viewer/lib/three.module.min.js" } }
+</script>
+</head>
+<body>
+<header>
+  <img src="/assets/emblem_header.png" alt="">
+  <div class="brand"><b>ACE COMBAT 8</b><span>MODEL VIEWER</span></div>
+  <select id="file"></select>
+  <div class="sep"></div>
+  <select id="mode" title="Shading">
+    <option value="lit">Lit</option><option value="unlit">Colour only</option>
+    <option value="normals">Normals</option><option value="clay">Clay</option>
+  </select>
+  <button id="wire">Wireframe</button>
+  <button id="skel">Skeleton</button>
+  <button id="grid" class="on">Grid</button>
+  <select id="bg" title="Background"><option value="#0c0c0e">Dark</option><option value="#5a6170">Grey</option><option value="#dfe3ea">Light</option></select>
+  <div class="grow"></div>
+  <button id="frame">Frame</button>
+  <button id="shot">Screenshot</button>
+</header>
+<main>
+  <aside>
+    <div class="tabs"><button data-pane="parts" class="on">PARTS</button><button data-pane="bones">BONES</button><button data-pane="info">INFO</button></div>
+    <div class="pane on" id="parts">
+      <div class="btnrow"><button id="allOn">Show all</button><button id="allOff">Hide all</button></div>
+      <div class="small">Click a name to show only that part. Tick boxes to show / hide.</div>
+      <div id="partList"></div>
+    </div>
+    <div class="pane" id="bones">
+      <div class="small">Pick a bone, then pose it. Moving parts (gear, flaps, airbrakes, wings…) follow.</div>
+      <div id="boneCtl" style="display:none">
+        <div class="label" id="boneName"></div>
+        <div class="slider"><span>Rotate X</span><input type="range" min="-180" max="180" value="0" id="rx"></div>
+        <div class="slider"><span>Rotate Y</span><input type="range" min="-180" max="180" value="0" id="ry"></div>
+        <div class="slider"><span>Rotate Z</span><input type="range" min="-180" max="180" value="0" id="rz"></div>
+        <div class="btnrow"><button id="boneReset">Reset bone</button><button id="allReset">Reset all</button></div>
+      </div>
+      <div id="boneList"></div>
+    </div>
+    <div class="pane" id="info"><div class="kv" id="infoKv"></div></div>
+  </aside>
+  <div id="view"><div id="status">Loading…</div><div id="hint">Left-drag rotate · right-drag pan · wheel zoom · F frame</div></div>
+</main>
+<script type="module">
+import * as THREE from "three";
+import { GLTFLoader } from "/viewer/lib/jsm/loaders/GLTFLoader.js";
+import { OrbitControls } from "/viewer/lib/jsm/controls/OrbitControls.js";
+import { RoomEnvironment } from "/viewer/lib/jsm/environments/RoomEnvironment.js";
+
+const $ = (id) => document.getElementById(id);
+const view = $("view"), status = $("status");
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.9;
+view.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color("#0c0c0e");
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environmentIntensity = 0.55;
+const sun = new THREE.DirectionalLight(0xfff4e8, 2.2); sun.position.set(6, 10, 4); scene.add(sun);
+const fill = new THREE.DirectionalLight(0xbfd2ff, 0.35); fill.position.set(-6, -3, -5); scene.add(fill);
+const camera = new THREE.PerspectiveCamera(40, 1, 0.01, 5000);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+let model = null, grid = null, skelHelper = null, files = [], parts = new Map(), bones = [], selBone = null;
+let version = -1;
+const token = new URLSearchParams(location.search).get("t") || "";
+const setTitle = (name) => (document.title = (name ? name + " — " : "") + "AC8 Model Viewer" + (token ? ` [${token}]` : ""));
+setTitle("");
+const original = new Map();
+
+function resize() {
+  const w = view.clientWidth, h = view.clientHeight;
+  renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+window.addEventListener("resize", resize); resize();
+
+function frame() {
+  if (!model) return;
+  const box = new THREE.Box3().setFromObject(model);
+  const size = box.getSize(new THREE.Vector3()), center = box.getCenter(new THREE.Vector3());
+  const r = Math.max(size.length() / 2, 0.01);
+  controls.target.copy(center);
+  const dir = new THREE.Vector3(1, 0.55, 1.2).normalize();
+  camera.position.copy(center).addScaledVector(dir, r / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2)) * 0.62);
+  camera.near = r / 200; camera.far = r * 200; camera.updateProjectionMatrix();
+  controls.update();
+  if (grid) scene.remove(grid);
+  const g = Math.pow(10, Math.ceil(Math.log10(Math.max(size.x, size.z) * 1.5)));
+  grid = new THREE.GridHelper(g, 20, 0x3a3a44, 0x24242b);
+  grid.position.set(center.x, box.min.y, center.z);
+  grid.visible = $("grid").classList.contains("on");
+  scene.add(grid);
+}
+
+function baseName(n) { return (n || "(no material)").replace(/\.\d{4}$/, ""); }
+
+function buildParts() {
+  parts.clear();
+  model.traverse((o) => {
+    if (!o.isMesh) return;
+    const key = baseName(o.material && o.material.name);
+    if (!parts.has(key)) parts.set(key, []);
+    parts.get(key).push(o);
+  });
+  const list = $("partList"); list.innerHTML = "";
+  [...parts.keys()].sort().forEach((key) => {
+    const meshes = parts.get(key);
+    const tris = meshes.reduce((a, m) => a + (m.geometry.index ? m.geometry.index.count : m.geometry.attributes.position.count) / 3, 0);
+    const row = document.createElement("div"); row.className = "row";
+    const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = true;
+    cb.onclick = (e) => { e.stopPropagation(); meshes.forEach((m) => (m.visible = cb.checked)); };
+    const name = document.createElement("div"); name.className = "name"; name.textContent = key; name.title = key;
+    const meta = document.createElement("div"); meta.className = "meta";
+    meta.textContent = (meshes.length > 1 ? meshes.length + " tiles · " : "") + Math.round(tris).toLocaleString() + " tris";
+    row.append(cb, name, meta);
+    row.onclick = () => {  // solo
+      parts.forEach((ms, k) => ms.forEach((m) => (m.visible = k === key)));
+      list.querySelectorAll("input").forEach((c) => (c.checked = c === cb));
+    };
+    list.appendChild(row);
+  });
+}
+
+function setAll(on) {
+  parts.forEach((ms) => ms.forEach((m) => (m.visible = on)));
+  $("partList").querySelectorAll("input").forEach((c) => (c.checked = on));
+}
+
+function buildBones() {
+  bones = []; selBone = null; $("boneCtl").style.display = "none";
+  const seen = new Set();
+  model.traverse((o) => { if (o.isBone && !seen.has(o)) { seen.add(o); bones.push(o); o.userData.rest = o.quaternion.clone(); o.userData.rot = [0, 0, 0]; } });
+  const list = $("boneList"); list.innerHTML = "";
+  if (!bones.length) { list.innerHTML = '<div class="small" style="margin-top:10px">This model has no bones (static mesh).</div>'; return; }
+  bones.forEach((b) => {
+    let depth = 0, p = b.parent; while (p && p.isBone) { depth++; p = p.parent; }
+    const row = document.createElement("div"); row.className = "row";
+    row.style.paddingLeft = 4 + depth * 12 + "px";
+    row.innerHTML = `<div class="name"></div>`; row.firstChild.textContent = b.name;
+    row.onclick = () => {
+      list.querySelectorAll(".row").forEach((r) => r.classList.remove("sel")); row.classList.add("sel");
+      selBone = b; $("boneCtl").style.display = "block"; $("boneName").textContent = b.name;
+      ["rx", "ry", "rz"].forEach((id, i) => ($(id).value = b.userData.rot[i]));
+    };
+    list.appendChild(row);
+  });
+}
+
+function applyBone(b) {
+  const [x, y, z] = b.userData.rot.map(THREE.MathUtils.degToRad);
+  b.quaternion.copy(b.userData.rest).multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(x, y, z)));
+}
+["rx", "ry", "rz"].forEach((id, i) => $(id).addEventListener("input", (e) => {
+  if (!selBone) return; selBone.userData.rot[i] = +e.target.value; applyBone(selBone);
+}));
+$("boneReset").onclick = () => { if (selBone) { selBone.userData.rot = [0, 0, 0]; applyBone(selBone); ["rx", "ry", "rz"].forEach((id) => ($(id).value = 0)); } };
+$("allReset").onclick = () => { bones.forEach((b) => { b.userData.rot = [0, 0, 0]; applyBone(b); }); ["rx", "ry", "rz"].forEach((id) => ($(id).value = 0)); };
+
+function setMode(mode) {
+  model.traverse((o) => {
+    if (!o.isMesh) return;
+    if (!original.has(o)) original.set(o, o.material);
+    const src = original.get(o);
+    if (mode === "lit") o.material = src;
+    else if (mode === "unlit") o.material = new THREE.MeshBasicMaterial({ map: src.map || null, color: src.map ? 0xffffff : src.color, transparent: src.transparent, opacity: src.opacity, alphaTest: src.alphaTest, side: src.side });
+    else if (mode === "normals") o.material = new THREE.MeshNormalMaterial({ normalMap: src.normalMap || null, side: src.side });
+    else o.material = new THREE.MeshStandardMaterial({ color: 0xb8bcc6, roughness: 0.65, metalness: 0.0, side: src.side });
+    o.material.wireframe = $("wire").classList.contains("on");
+    o.material.name = src.name;
+  });
+}
+
+function info(gltf, name, bytes) {
+  let verts = 0, tris = 0, mats = new Set(), maps = new Set();
+  model.traverse((o) => {
+    if (!o.isMesh) return;
+    verts += o.geometry.attributes.position.count;
+    tris += (o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3;
+    const m = original.get(o) || o.material; mats.add(baseName(m.name));
+    ["map", "normalMap", "roughnessMap", "aoMap", "emissiveMap"].forEach((k) => m[k] && maps.add(m[k].uuid));
+  });
+  const box = new THREE.Box3().setFromObject(model), s = box.getSize(new THREE.Vector3());
+  const kv = [["File", name], ["Size", (bytes / 1e6).toFixed(1) + " MB"], ["Vertices", verts.toLocaleString()],
+              ["Triangles", Math.round(tris).toLocaleString()], ["Materials", mats.size], ["Textures", maps.size],
+              ["Bones", bones.length || "none"], ["Dimensions", `${s.x.toFixed(2)} × ${s.z.toFixed(2)} × ${s.y.toFixed(2)} m`],
+              ["", "(length × width × height)"]];
+  $("infoKv").innerHTML = "";
+  kv.forEach(([k, v]) => { const a = document.createElement("div"), b = document.createElement("div"); a.textContent = k; b.textContent = v; $("infoKv").append(a, b); });
+}
+
+async function load(i) {
+  const f = files[i]; if (!f) return;
+  status.className = ""; status.style.display = "block"; status.textContent = `Loading ${f.name}…`;
+  if (model) {  // free the previous model (the page stays open between previews)
+    scene.remove(model);
+    model.traverse((o) => {
+      if (!o.isMesh) return;
+      o.geometry.dispose();
+      const mats = [original.get(o) || o.material, o.material];
+      mats.forEach((m) => { if (!m) return; ["map", "normalMap", "roughnessMap", "metalnessMap", "aoMap", "emissiveMap"].forEach((k) => m[k] && m[k].dispose()); m.dispose(); });
+    });
+    model = null; original.clear();
+  }
+  if (skelHelper) { scene.remove(skelHelper); skelHelper = null; }
+  try {
+    const gltf = await new GLTFLoader().loadAsync(f.url, (e) => {
+      if (e.total) status.textContent = `Loading ${f.name}… ${Math.round(e.loaded / e.total * 100)}%`;
+    });
+    model = gltf.scene; scene.add(model);
+    buildParts(); buildBones(); info(gltf, f.name, f.size); setMode($("mode").value); frame();
+    if ($("skel").classList.contains("on")) toggleSkel(true);
+    status.style.display = "none";
+    setTitle(f.name);
+  } catch (e) {
+    status.className = "err"; status.textContent = `Couldn't load ${f.name}: ${e.message || e}`;
+  }
+}
+
+function toggleSkel(on) {
+  if (skelHelper) { scene.remove(skelHelper); skelHelper = null; }
+  if (on && model && bones.length) { skelHelper = new THREE.SkeletonHelper(model); skelHelper.material.depthTest = false; skelHelper.material.vertexColors = false; skelHelper.material.color.set("#e63c2d"); skelHelper.material.needsUpdate = true; scene.add(skelHelper); }
+}
+
+document.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => {
+  document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("on", x === b));
+  document.querySelectorAll(".pane").forEach((p) => p.classList.toggle("on", p.id === b.dataset.pane));
+});
+$("wire").onclick = (e) => { e.target.classList.toggle("on"); if (model) model.traverse((o) => o.isMesh && (o.material.wireframe = e.target.classList.contains("on"))); };
+$("skel").onclick = (e) => { e.target.classList.toggle("on"); toggleSkel(e.target.classList.contains("on")); };
+$("grid").onclick = (e) => { e.target.classList.toggle("on"); if (grid) grid.visible = e.target.classList.contains("on"); };
+$("bg").onchange = (e) => (scene.background = new THREE.Color(e.target.value));
+$("mode").onchange = (e) => model && setMode(e.target.value);
+$("frame").onclick = frame;
+$("allOn").onclick = () => setAll(true);
+$("allOff").onclick = () => setAll(false);
+$("file").onchange = (e) => load(+e.target.value);
+window.addEventListener("keydown", (e) => { if (e.key === "f" || e.key === "F") frame(); });
+$("shot").onclick = async () => {
+  renderer.render(scene, camera);
+  const url = renderer.domElement.toDataURL("image/png");
+  const name = (files[+$("file").value] || {}).name || "model";
+  try {
+    const r = await fetch("/screenshot", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, data: url }) });
+    const { path } = await r.json();
+    status.className = ""; status.style.display = "block"; status.textContent = path ? `Saved next to the model: ${path}` : "Couldn't save the screenshot";
+  } catch (e) { status.className = "err"; status.style.display = "block"; status.textContent = "Couldn't save the screenshot: " + e; }
+  setTimeout(() => (status.style.display = "none"), 3000);
+};
+
+(function loop() { requestAnimationFrame(loop); controls.update(); renderer.render(scene, camera); })();
+
+async function refreshFiles() {
+  const data = await (await fetch("/files.json", { cache: "no-store" })).json();
+  version = data.version; files = data.files;
+  const sel = $("file"); sel.innerHTML = "";
+  files.forEach((f, i) => { const o = document.createElement("option"); o.value = i; o.textContent = f.label || f.name; sel.appendChild(o); });
+  sel.style.display = files.length > 1 ? "" : "none";
+  if (!files.length) { status.className = ""; status.style.display = "block"; status.textContent = "Press Preview 3D or View 3D in the app to show a model here."; return; }
+  const start = Math.max(0, files.findIndex((f) => f.first));
+  sel.value = start; load(start);
+}
+refreshFiles().catch((e) => { status.className = "err"; status.textContent = "Couldn't get the file list: " + e; });
+setInterval(async () => {  // the app swaps models by bumping the version
+  try {
+    const st = await (await fetch("/state", { cache: "no-store" })).json();
+    if (st.version !== version) refreshFiles();
+  } catch (e) { /* app closed */ }
+}, 1000);
+</script>
+</body>
+</html>

@@ -1,0 +1,27 @@
+#define VS_VERSION_INFO 1
+APPICON ICON "app.ico"
+1 24 "app.manifest"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 2,38,0,0
+ PRODUCTVERSION 2,38,0,0
+ FILEOS 0x40004
+ FILETYPE 0x1
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "FileDescription", "ACE Combat 8 Asset Extractor"
+      VALUE "ProductName", "ACE Combat 8 Asset Extractor"
+      VALUE "FileVersion", "2.38.0.0"
+      VALUE "ProductVersion", "2.38.0.0"
+      VALUE "OriginalFilename", "AC8 Asset Extractor.exe"
+      VALUE "InternalName", "AC8 Asset Extractor"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END
