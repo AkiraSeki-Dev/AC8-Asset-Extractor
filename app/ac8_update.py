@@ -5,7 +5,6 @@ copies the new files over the app folder but never touches the user's own files:
 exports, logs, the AES key and the unpacking tools (those have their own updater, see ac8_tools.py).
 """
 import io
-import json
 import os
 import re
 import shutil
@@ -40,14 +39,21 @@ def _get(url, timeout=30):
 
 
 def latest():
-    """{'version': '2.38', 'url': zip download, 'notes': release text} of the newest release."""
-    rel = json.loads(_get(f"https://api.github.com/repos/{REPO}/releases/latest"))
-    asset = next((a for a in rel.get("assets", []) if a["name"].lower().endswith(".zip")), None)
-    if asset is None:
-        raise RuntimeError(f"release {rel.get('tag_name')} has no zip to download")
-    ver = parse(rel.get("tag_name", ""))
-    return {"version": ".".join(map(str, ver[:2] if ver and ver[2] == 0 else ver or ())) or rel.get("tag_name"),
-            "url": asset["browser_download_url"], "notes": rel.get("body") or ""}
+    """{'version': '1.1', 'url': zip download, 'notes': release text} of the newest release. Found through the
+    normal release pages (not GitHub's API, which only allows 60 lookups an hour per internet connection)."""
+    from ac8_tools import latest_tag
+    tag = latest_tag(REPO)
+    ver = parse(tag)
+    version = ".".join(map(str, ver[:2] if ver and ver[2] == 0 else ver or ())) or tag
+    url = f"https://github.com/{REPO}/releases/download/{tag}/AC8_Asset_Extractor_{tag}.zip"
+    notes = ""
+    try:  # the README's line for this version is the release notes
+        text = _get(f"https://raw.githubusercontent.com/{REPO}/{tag}/README.md").decode("utf-8", "replace")
+        m = re.search(rf"^v{re.escape(tag.lstrip('v'))}:(.*?)(?=^v\d+\.\d+:|^## |\Z)", text, re.S | re.M)
+        notes = m.group(1).strip() if m else ""
+    except Exception:
+        pass
+    return {"version": version, "url": url, "notes": notes}
 
 
 def _kept(rel):

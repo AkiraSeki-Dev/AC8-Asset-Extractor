@@ -39,7 +39,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # sibling ac8_* 
 import ac8_catalog as catalog  # noqa: E402  (pure python, no extra packages)
 
 APP_NAME = "ACE Combat 8 Asset Extractor"
-APP_VERSION = "1.0"
+APP_VERSION = "1.0.1"
 CODE = Path(__file__).resolve().parent         # app/: the scripts and their fonts, icons and web viewer
 HERE = CODE.parent                             # the app folder (the exe, app/, AC8 Unpacker/, data/, logs/)
 DATA_DIR = HERE / "data"                       # your own files: settings, asset list, update history
@@ -2388,7 +2388,7 @@ class App(tk.Tk):
             done, current = [], []
             for name, (have, ver, url, err) in ac8_tools.check(tools).items():
                 if err:
-                    raise RuntimeError(f"Couldn't reach GitHub ({err}). Check your internet connection.")
+                    raise RuntimeError(f"Couldn't check for tool updates: {err}.")
                 if have is None or not have or ac8_tools.newer(ver, have):
                     self.post("step", f"Updating {name} to {ver}…")
                     ac8_tools.install(tools, name, ver, url, log=lambda t: self.post("log", t))
@@ -2418,7 +2418,8 @@ class App(tk.Tk):
             try:
                 info = ac8_update.latest()
             except Exception as e:
-                raise RuntimeError(f"Couldn't reach GitHub ({e}). Check your internet connection.")
+                import ac8_tools
+                raise RuntimeError(f"Couldn't check for updates: {ac8_tools.friendly_error(e)}.")
             if not ac8_update.newer(info["version"], APP_VERSION):
                 return f"✔ You have the latest version (v{APP_VERSION})"
             box, ev = {}, threading.Event()

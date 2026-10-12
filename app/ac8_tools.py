@@ -9,6 +9,8 @@ import json
 import os
 import re
 import subprocess
+import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -70,14 +72,46 @@ def _get(url, timeout=30):
         return r.read()
 
 
+def latest_tag(repo):
+    """Tag of a repo's newest release, read from where github.com/<repo>/releases/latest redirects to. This is a
+    normal web page, so it doesn't use up GitHub's API allowance (60 lookups an hour per internet connection)."""
+    req = urllib.request.Request(f"https://github.com/{repo}/releases/latest", method="HEAD",
+                                 headers={"User-Agent": "ac8-asset-extractor"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        final = r.geturl()
+    if "/releases/tag/" not in final:
+        raise RuntimeError(f"{repo} has no release yet")
+    return urllib.parse.unquote(final.rsplit("/releases/tag/", 1)[1].strip("/"))
+
+
+def friendly_error(e):
+    """Short reason for a failed GitHub request."""
+    code = getattr(e, "code", None)
+    if code in (403, 429):
+        return "GitHub is limiting requests from your connection right now — try again in a while"
+    if code == 404:
+        return "the release wasn't found on GitHub"
+    if isinstance(e, urllib.error.URLError):
+        return "couldn't reach GitHub — check your internet connection"
+    return str(e)
+
+
 def latest(name):
     """(version string, download url) of the newest Windows release."""
-    rel = json.loads(_get(f"https://api.github.com/repos/{REPOS[name]}/releases/latest"))
-    asset = next((a for a in rel.get("assets", []) if a["name"].endswith(ASSET_SUFFIX)), None)
-    if asset is None:
-        raise RuntimeError(f"{name} {rel.get('tag_name')}: no Windows download in the release")
-    ver = parse_version(rel.get("tag_name", ""))
-    return (".".join(map(str, ver)) if ver else rel.get("tag_name", "?")), asset["browser_download_url"]
+    repo = REPOS[name]
+    try:
+        tag = latest_tag(repo)
+        url = f"https://github.com/{repo}/releases/download/{tag}/{name}_cli-{ASSET_SUFFIX}"
+    except urllib.error.HTTPError:
+        raise
+    except Exception:  # the web redirect didn't work: fall back to the API
+        rel = json.loads(_get(f"https://api.github.com/repos/{repo}/releases/latest"))
+        asset = next((a for a in rel.get("assets", []) if a["name"].endswith(ASSET_SUFFIX)), None)
+        if asset is None:
+            raise RuntimeError(f"{name} {rel.get('tag_name')}: no Windows download in the release")
+        tag, url = rel.get("tag_name", "?"), asset["browser_download_url"]
+    ver = parse_version(tag)
+    return (".".join(map(str, ver)) if ver else tag), url
 
 
 def newer(a, b):
@@ -118,7 +152,7 @@ def check(tools):
             ver, url = latest(name)
             out[name] = (have, ver, url, None)
         except Exception as e:  # offline, rate-limited …
-            out[name] = (have, None, None, str(e))
+            out[name] = (have, None, None, friendly_error(e))
     return out
 
 

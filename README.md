@@ -93,6 +93,9 @@ AC8 Asset Extractor\
 
 ## Version history
 
+v1.0.1: update checks no longer fail with "rate limit exceeded" — they use GitHub's normal release pages instead of
+its API, which only allows a few lookups an hour per internet connection.
+
 v1.0: first public release.
 
 ## Credits
