@@ -3398,8 +3398,7 @@ class App(tk.Tk):
             o = [("", "None")] + [(c, labels.get(c, c) if labels else f"Set {c[3:]}") for c in ch]
             dd.set_options(o)
         if att or data:
-            # left of the navigation gizmo (top right corner)
-            self.view_aircraft.place(relx=1.0, x=-round(92 * SCALE) - 18, y=10, anchor="ne")
+            self.view_aircraft.place(x=10, y=10, anchor="nw")  # top left (the axis circle has the top right)
             self.view_aircraft.lift()
         else:
             self.view_aircraft.place_forget()
@@ -3708,8 +3707,7 @@ class App(tk.Tk):
         self.view_tex_preview.configure(image=img, text="")
         w, h = m.image_sizes.get(ii, th.size)
         self.v_view_tex_info.set(f"{m.image_names[ii]}\n{w} × {h}  ·  used as {role_name(role)} on {part}")
-        self.v_view_mode.set({"base": "tex_base", "normal": "tex_normal", "mr": "tex_mr"}[role])
-        self._view_apply()
+        # only the preview box changes; the 3D view keeps its shading (MAP picks a texture view there)
 
     def _view_tex_changed(self):
         if self.glv is None or self.glv.r is None:
@@ -4106,9 +4104,11 @@ class App(tk.Tk):
         self.view_panel_seg = Segmented(seg_row, self.v_view_panel, [("parts", "Parts"), ("bones", "Bones"),
                                                                    ("info", "Info")])
         self.view_panel_seg.pack(side="left")
-        tk.Label(inner, text="Middle-drag rotate · Shift+middle-drag pan · wheel zoom · F frame\n"
-                 "(left-drag rotates and right-drag pans too) · axis circle: click to snap, drag to rotate\n"
-                 "Ctrl+F or Shift+` free fly: mouse look · W A S D · Q down · E up\n"
+        tk.Label(inner, text="Middle-drag rotate · Shift+middle-drag pan · wheel zoom\n"
+                 "Left-drag rotates and right-drag pans too · F frame\n"
+                 "Axis circle: click a ball to snap, drag to rotate\n"
+                 "Ctrl+F or Shift+` free fly: mouse look\n"
+                 "W A S D move · Q down · E up\n"
                  "Shift+wheel fly speed · Alt+wheel field of view",
                  bg=C["bg1"], fg=C["text3"], font=F["small"], justify="left", anchor="w").pack(side="bottom",
                                                                                                 fill="x", pady=(8, 0))
