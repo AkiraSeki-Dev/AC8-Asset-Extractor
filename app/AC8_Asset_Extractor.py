@@ -3283,6 +3283,7 @@ class App(tk.Tk):
         self.glv = ac8_glview.GLView(self.view_host, bg=C["bg0"], on_error=self._view_fail,
                                      on_ready=self._view_ready)
         self.glv.on_fly = self._view_fly_changed
+        self.gizmo = ac8_glview.NavGizmo(self.glv, size=round(92 * SCALE), font=(F["bold"][0], 9, "bold"))
         return self.glv
 
     def _view_ready(self, r):
@@ -3291,6 +3292,8 @@ class App(tk.Tk):
 
     def _view_fail(self, why):
         self._glv_failed = why
+        if getattr(self, "gizmo", None) is not None:
+            self.gizmo.place_forget()
         if self.glv is not None:
             try:
                 self.glv.pack_forget()
@@ -3395,7 +3398,8 @@ class App(tk.Tk):
             o = [("", "None")] + [(c, labels.get(c, c) if labels else f"Set {c[3:]}") for c in ch]
             dd.set_options(o)
         if att or data:
-            self.view_aircraft.place(relx=1.0, x=-10, y=10, anchor="ne")
+            # left of the navigation gizmo (top right corner)
+            self.view_aircraft.place(relx=1.0, x=-round(92 * SCALE) - 18, y=10, anchor="ne")
             self.view_aircraft.lift()
         else:
             self.view_aircraft.place_forget()
@@ -3594,6 +3598,8 @@ class App(tk.Tk):
         self.view_placeholder.place_forget()
         if not self.glv.winfo_ismapped():
             self.glv.pack(fill="both", expand=True)
+        if getattr(self, "gizmo", None) is not None and not self.gizmo.winfo_ismapped():
+            self.gizmo.place_in(relx=1.0, x=-8, y=8, anchor="ne")
         self._view_model, self._view_stats = model, stats
         self.glv.set_model(model, keep_camera=keep_camera, livery=spec)
         self._view_apply()
@@ -4101,7 +4107,7 @@ class App(tk.Tk):
                                                                    ("info", "Info")])
         self.view_panel_seg.pack(side="left")
         tk.Label(inner, text="Middle-drag rotate · Shift+middle-drag pan · wheel zoom · F frame\n"
-                 "(left-drag rotates and right-drag pans too)\n"
+                 "(left-drag rotates and right-drag pans too) · axis circle: click to snap, drag to rotate\n"
                  "Ctrl+F or Shift+` free fly: mouse look · W A S D · Q down · E up\n"
                  "Shift+wheel fly speed · Alt+wheel field of view",
                  bg=C["bg1"], fg=C["text3"], font=F["small"], justify="left", anchor="w").pack(side="bottom",

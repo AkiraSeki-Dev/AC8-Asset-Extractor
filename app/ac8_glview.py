@@ -1570,6 +1570,127 @@ def GLView(parent, bg="#0c0c0e", on_error=None, on_ready=None):
     return _make_window_view(parent, bg, on_error, on_ready)
 
 
+class NavGizmo(tk.Canvas):
+    """Blender's navigation gizmo for a GLView: the X / Y / Z axes as seen from the camera. Click a ball to look
+    along that axis, drag the circle to orbit. Labelled like Blender (Z up), which is how the exported GLBs open
+    there: Blender X = glTF +X, Blender Y = glTF -Z, Blender Z = glTF +Y."""
+
+    AXES = (("X", (1.0, 0.0, 0.0), "#ff3352"), ("Y", (0.0, 0.0, -1.0), "#8bdc00"), ("Z", (0.0, 1.0, 0.0), "#2890ff"))
+
+    def __init__(self, view, size=96, font=None):
+        tk.Canvas.__init__(self, view.master, width=size, height=size, highlightthickness=0, bd=0,
+                           bg=self._bg(view), cursor="hand2")
+        self.view, self.size = view, size
+        self.font = font or ("Segoe UI", max(7, size // 12), "bold")
+        self._job, self._hover, self._press, self._balls = None, None, None, []
+        view.gizmo = self
+        self.bind("<Motion>", self._motion)
+        self.bind("<Leave>", lambda e: self._set_hover(None))
+        self.bind("<ButtonPress-1>", self._down)
+        self.bind("<B1-Motion>", self._drag)
+        self.bind("<ButtonRelease-1>", self._up)
+        self.request()
+
+    @staticmethod
+    def _bg(view):
+        r = getattr(view, "r", None)
+        c = BACKGROUNDS.get(r.opts.get("bg", "dark") if r else "dark", BACKGROUNDS["dark"])
+        return "#%02x%02x%02x" % tuple(round(v * 255) for v in c)
+
+    def place_in(self, **kw):
+        self.place(**kw)
+        self.tk.call("raise", self._w)  # (Canvas.lift raises canvas items, not the widget)
+
+    def request(self):
+        if self._job is None:
+            try:
+                self._job = self.after_idle(self.draw)
+            except tk.TclError:
+                pass
+
+    def draw(self):
+        self._job = None
+        v = self.view
+        if v.r is None:
+            return
+        light = v.r.opts.get("bg") == "light"
+        self.configure(bg=self._bg(v))
+        self.delete("all")
+        s = self.size
+        c, R, br = s / 2, s / 2 - s * 0.13, s * 0.105
+        if self._hover is not None or self._press is not None:
+            self.create_oval(1, 1, s - 1, s - 1, fill="#c8c8cc" if light else "#3a3a40", outline="")
+        view_m = look_at(v.r.cam.eye(), v.r.cam.target)
+        right, up, toward = view_m[0, :3], view_m[1, :3], view_m[2, :3]
+        balls = []
+        for name, d, col in self.AXES:
+            for sign in (1, -1):
+                w = np.array(d) * sign
+                x, y = c + R * float(w @ right), c - R * float(w @ up)
+                balls.append((float(w @ toward), sign, name, col, x, y, tuple(w)))
+        balls.sort(key=lambda b: b[0])  # far side first
+        self._balls = []
+        for depth, sign, name, col, x, y, w in balls:
+            hot = self._hover == (name, sign)
+            if sign > 0:
+                self.create_line(c, c, x, y, fill=col, width=max(2, s // 40))
+                self.create_oval(x - br, y - br, x + br, y + br, fill="#ffffff" if hot else col, outline="")
+                self.create_text(x, y + 0.5, text=name, font=self.font, fill="#101014" if not hot else col)
+            else:
+                fill = _mix(col, "#ffffff" if light else "#000000", 0.55)
+                self.create_oval(x - br, y - br, x + br, y + br, fill=col if hot else fill, outline=col,
+                                 width=max(1, s // 64))
+                if hot:
+                    self.create_text(x, y + 0.5, text="-" + name, font=self.font, fill="#101014")
+            self._balls.append((x, y, br, name, sign, w))
+
+    def _hit(self, x, y):
+        for bx, by, br, name, sign, w in reversed(self._balls):  # front-most first
+            if (x - bx) ** 2 + (y - by) ** 2 <= (br + 2) ** 2:
+                return name, sign, w
+        return None
+
+    def _inside(self, x, y):
+        return (x - self.size / 2) ** 2 + (y - self.size / 2) ** 2 <= (self.size / 2) ** 2
+
+    def _set_hover(self, h):
+        if h != self._hover:
+            self._hover = h
+            self.request()
+
+    def _motion(self, e):
+        hit = self._hit(e.x, e.y)
+        self._set_hover(hit[:2] if hit else ("ring", 0) if self._inside(e.x, e.y) else None)
+        self.configure(cursor="hand2" if hit else "fleur" if self._inside(e.x, e.y) else "")
+
+    def _down(self, e):
+        self._press = (e.x, e.y, e.x, e.y, False)
+
+    def _drag(self, e):
+        if self._press is None or self.view.r is None:
+            return
+        x0, y0, lx, ly, moved = self._press
+        if not moved and abs(e.x - x0) + abs(e.y - y0) < 3:
+            return
+        self.view.set_fly(False)
+        self.view.r.cam.orbit(e.x - lx, e.y - ly)
+        self.view.request()
+        self._press = (x0, y0, e.x, e.y, True)
+
+    def _up(self, e):
+        p, self._press = self._press, None
+        if p and not p[4]:
+            hit = self._hit(e.x, e.y)
+            if hit:
+                self.view.snap_to(hit[2])
+        self.request()
+
+
+def _mix(a, b, t):
+    a, b = (tuple(int(h[i:i + 2], 16) for i in (1, 3, 5)) for h in (a, b))
+    return "#%02x%02x%02x" % tuple(round(x + (y - x) * t) for x, y in zip(a, b))
+
+
 class _ViewMixin:
     """Mouse controls, redraw scheduling and the shared API for both widget kinds."""
 
@@ -1832,6 +1953,34 @@ class _ViewMixin:
     def request(self):
         if self._redraw_job is None:
             self._redraw_job = self.after_idle(self._redraw_now)
+        g = getattr(self, "gizmo", None)
+        if g is not None:
+            g.request()
+
+    def snap_to(self, back, ms=220):
+        """Turn the camera (around the point it looks at) so it looks from direction `back`, animated."""
+        if self.r is None:
+            return
+        self.set_fly(False)
+        cam = self.r.cam
+        bx, by, bz = back
+        if abs(by) > 0.99:
+            yaw1, pitch1 = 0.0, math.copysign(1.5697, by)  # top / bottom: keep "forward" pointing up the screen
+        else:
+            yaw1, pitch1 = math.atan2(bx, bz), math.asin(max(-1.0, min(1.0, by)))
+        yaw0, pitch0 = cam.yaw, cam.pitch
+        d = (yaw1 - yaw0 + math.pi) % (2 * math.pi) - math.pi  # the short way round
+        t0 = time.time()
+        if getattr(self, "_snap_job", None):
+            self.after_cancel(self._snap_job)
+
+        def step():
+            t = min((time.time() - t0) * 1000 / ms, 1.0)
+            e = t * t * (3 - 2 * t)
+            cam.yaw, cam.pitch = yaw0 + d * e, pitch0 + (pitch1 - pitch0) * e
+            self.request()
+            self._snap_job = self.after(15, step) if t < 1 else None
+        step()
 
     def _ready(self):
         if self._pending_model is not None:

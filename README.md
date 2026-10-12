@@ -58,6 +58,7 @@ Open it with **View 3D** on an extraction or **Preview** in the catalog.
 | Orbit | middle-drag (or left-drag) |
 | Pan | **Shift** + middle-drag (or right-drag) |
 | Zoom | mouse wheel |
+| Snap to a side | click an axis ball on the circle in the top right corner (drag the circle to rotate) |
 | Frame the model | **F** or double-click |
 | Free fly on / off | **Ctrl + F** or **Shift + `** (Esc also stops) |
 | Free fly | move the mouse to look, **W A S D** move, **Q** down, **E** up, wheel forward/back |
