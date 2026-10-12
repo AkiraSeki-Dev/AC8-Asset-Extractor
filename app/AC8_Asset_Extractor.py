@@ -3005,7 +3005,8 @@ class App(tk.Tk):
             self._cat_section("No 3D models here", "This folder has no meshes — Tick or Extract it to get its "
                                                     "files (textures come out as PNG).")
         by = {}
-        parts = gname == "Characters"  # characters: by what the mesh is (outfits, faces, hair …), not by folder
+        # characters (incl. the online ones): by what the mesh is (outfits, faces, hair …), not by folder
+        parts = gname == "Characters" or ikey.startswith("Character/")
         for k in meshes:
             if parts:
                 by.setdefault(catalog.character_part(k.rsplit("/", 1)[-1].rsplit(".", 1)[0]), []).append(k)

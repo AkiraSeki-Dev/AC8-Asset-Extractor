@@ -143,6 +143,7 @@ OTHER = "Everything else"
 CHARACTER_KINDS = {"PI": "Pilot", "NC": "Character", "PC": "Squadron outfits", "NM": "Online", "UN": "Online",
                    "AC": "Animal", "MP": "MP"}
 CHARACTER_KIND_ORDER = ["Pilot", "Character", "Squadron outfits", "Online", "Animal", "MP"]
+ONLINE_KINDS = ("NM", "UN")  # online-mode characters: listed under Online avatars, not Characters
 # names confirmed in game: the pilot codes don't follow the callsign order (PI001 is Joker 4, PI004 is Joker 1)
 CHARACTER_NAMES = {
     "PI004": "Joker 1 (Rex)", "PI002": "Joker 2 (Professor)", "PI003": "Joker 3 (Tasha)", "PI001": "Joker 4 (Coster)",
@@ -295,7 +296,13 @@ def _add_collection(collections, key, parts):
     else:
         ikey = "/".join(parts[:n])
         title = " / ".join(parts[plen - 1 if group == OTHER else plen:n]) or parts[n - 1]
-        if group == "Characters":
+        if group == "Characters" and parts[plen:plen + 1] and parts[plen] in ONLINE_KINDS:
+            # Character/NM and Character/UN are the online mode's characters: they belong with the online avatars
+            group = "Online avatars"
+            sub = parts[plen:n]
+            title = f"Online character {sub[1]}" if len(sub) > 1 else f"Online characters ({sub[0]}, shared)"
+            sort = "1 " + title.lower()
+        elif group == "Characters":
             sub = parts[plen:n]
             title = character_title(sub[0], sub[1] if len(sub) > 1 else "")
             kind = CHARACTER_KINDS.get(sub[0], sub[0])
@@ -307,6 +314,7 @@ def _add_collection(collections, key, parts):
             sort = f"{rank:02d} " + (f"0 {order_.index(code)}" if main else f"1 {title.lower()}")
         elif group == "Online avatars":
             title = "Avatar · " + " / ".join(parts[plen:n])
+            sort = "0 " + title.lower()   # avatar parts first, then the online characters
     item = collections.setdefault(group, {}).setdefault(ikey, {"folder": ikey, "title": title, "meshes": [],
                                                                 "textures": 0, "count": 0, "keys": [],
                                                                 "sort": sort or title.lower()})
