@@ -143,6 +143,33 @@ def install(tools, name, version, url, log=print):
     log(f"  ✔ {name} {version} installed")
 
 
+# Oodle (Epic / RAD's decompressor) can't be shipped with the app. retoc and repak download this exact file the
+# first time they need it (repak's oodle_loader); the app fetches it the same way up front, with the same checksum.
+OODLE_DLL = "oo2core_9_win64.dll"
+OODLE_URL = ("https://github.com/WorkingRobot/OodleUE/raw/refs/heads/main/Engine/Source/Programs/Shared/"
+             "EpicGames.Oodle/Sdk/2.9.10/win/redist/oo2core_9_win64.dll")
+OODLE_SHA256 = "6f5d41a7892ea6b2db420f2458dad2f84a63901c9a93ce9497337b16c195f457"
+
+
+def has_oodle(tools):
+    return (Path(tools) / OODLE_DLL).exists()
+
+
+def install_oodle(tools, log=print):
+    """Download oo2core_9_win64.dll next to retoc / repak and check it before saving it."""
+    import hashlib
+    tools = Path(tools)
+    tools.mkdir(parents=True, exist_ok=True)
+    log("  Downloading the Oodle decompressor (oo2core_9_win64.dll)…")
+    data = _get(OODLE_URL, timeout=120)
+    if hashlib.sha256(data).hexdigest() != OODLE_SHA256:
+        raise RuntimeError("the downloaded Oodle DLL didn't match its checksum, so it wasn't saved")
+    tmp = tools / (OODLE_DLL + ".new")
+    tmp.write_bytes(data)
+    os.replace(tmp, tools / OODLE_DLL)
+    log("  ✔ Oodle decompressor installed")
+
+
 def check(tools):
     """{name: (installed, latest, url, error)} for both tools (network errors are reported, not raised)."""
     out = {}

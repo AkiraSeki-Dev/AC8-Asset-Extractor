@@ -39,7 +39,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # sibling ac8_* 
 import ac8_catalog as catalog  # noqa: E402  (pure python, no extra packages)
 
 APP_NAME = "ACE Combat 8 Asset Extractor"
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.2"
 CODE = Path(__file__).resolve().parent         # app/: the scripts and their fonts, icons and web viewer
 HERE = CODE.parent                             # the app folder (the exe, app/, AC8 Unpacker/, data/, logs/)
 DATA_DIR = HERE / "data"                       # your own files: settings, asset list, update history
@@ -1732,7 +1732,7 @@ class App(tk.Tk):
             for t in ("retoc", "repak"):
                 v = ac8_tools.installed(tools, t)
                 parts.append(f"{t} missing" if v is None and t in missing else f"{t} {v} ✔" if v else f"{t} ✔")
-            self.v_tools.set("   ".join(parts) + ("   oodle ✔" if oodle else "   oodle dll missing"))
+            self.v_tools.set("   ".join(parts) + ("   oodle ✔" if oodle else "   oodle — Check for updates gets it"))
             if missing:
                 problems.append(" & ".join(missing) + " missing")
         else:
@@ -2395,6 +2395,14 @@ class App(tk.Tk):
                     done.append(f"{name} {have or '?'} → {ver}" if have is not None else f"{name} {ver}")
                 else:
                     current.append(f"{name} {have}")
+            if not ac8_tools.has_oodle(tools):
+                self.post("step", "Getting the Oodle decompressor…")
+                try:
+                    ac8_tools.install_oodle(tools, log=lambda t: self.post("log", t))
+                    done.append("oodle")
+                except Exception as e:
+                    self.post("log", f"  Oodle: {ac8_tools.friendly_error(e)} — retoc will try again itself when "
+                                     "it needs it")
             self.post("call", self.refresh_status)
             if done:
                 return "✔ Updated: " + ", ".join(done) + (f"  (up to date: {', '.join(current)})" if current else "")
@@ -2404,9 +2412,14 @@ class App(tk.Tk):
 
     def _tools_if_missing(self):
         """First start from a fresh download: fetch retoc / repak when they aren't there yet."""
-        if UNPACKER_DIR and IS_WIN and not all((UNPACKER_DIR / "tools" / f"{t}.exe").exists()
-                                               for t in ("retoc", "repak")):
-            self._log("retoc / repak not found — downloading them from GitHub…")
+        tools = UNPACKER_DIR / "tools" if UNPACKER_DIR else None
+        if tools is None or not IS_WIN:
+            return
+        missing = [f"{t}.exe" for t in ("retoc", "repak") if not (tools / f"{t}.exe").exists()]
+        if not (tools / "oo2core_9_win64.dll").exists():
+            missing.append("the Oodle decompressor")
+        if missing:
+            self._log(f"Getting {', '.join(missing)} from GitHub…")
             self.fetch_tools()
 
     def update_app(self):
