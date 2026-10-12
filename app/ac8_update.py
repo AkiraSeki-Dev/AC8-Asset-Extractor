@@ -49,7 +49,7 @@ def latest():
     notes = ""
     try:  # the README's line for this version is the release notes
         text = _get(f"https://raw.githubusercontent.com/{REPO}/{tag}/README.md").decode("utf-8", "replace")
-        m = re.search(rf"^v{re.escape(tag.lstrip('v'))}:(.*?)(?=^v\d+\.\d+:|^## |\Z)", text, re.S | re.M)
+        m = re.search(rf"^v{re.escape(tag.lstrip('v'))}:(.*?)(?=^v\d+(?:\.\d+)+:|^## |\Z)", text, re.S | re.M)
         notes = m.group(1).strip() if m else ""
     except Exception:
         pass
