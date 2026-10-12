@@ -1577,11 +1577,11 @@ class NavGizmo(tk.Canvas):
 
     AXES = (("X", (1.0, 0.0, 0.0), "#ff3352"), ("Y", (0.0, 0.0, -1.0), "#8bdc00"), ("Z", (0.0, 1.0, 0.0), "#2890ff"))
 
-    def __init__(self, view, size=96, font=None):
+    def __init__(self, view, size=96, font_file=None):
         tk.Canvas.__init__(self, view.master, width=size, height=size, highlightthickness=0, bd=0,
                            bg=self._bg(view), cursor="hand2")
         self.view, self.size = view, size
-        self.font = font or ("Segoe UI", max(7, size // 12), "bold")
+        self.font_file = font_file
         self._job, self._hover, self._press, self._balls = None, None, None, []
         view.gizmo = self
         self.bind("<Motion>", self._motion)
@@ -1608,18 +1608,49 @@ class NavGizmo(tk.Canvas):
             except tk.TclError:
                 pass
 
+    SS = 4  # drawn this many times larger, then scaled down: smooth (anti-aliased) edges
+
+    def _pil_font(self, px):
+        from PIL import ImageFont
+        key = round(px)
+        cache = self.__dict__.setdefault("_fonts", {})
+        if key not in cache:
+            f = None
+            for path in ([self.font_file] if self.font_file else []) + ["segoeuib.ttf", "arialbd.ttf",
+                                                                        "DejaVuSans-Bold.ttf"]:
+                try:
+                    f = ImageFont.truetype(path, key)
+                    break
+                except Exception:
+                    pass
+            if f is None:
+                try:
+                    f = ImageFont.load_default(key)
+                except Exception:
+                    f = ImageFont.load_default()
+            cache[key] = f
+        return cache[key]
+
     def draw(self):
         self._job = None
         v = self.view
         if v.r is None:
             return
+        from PIL import Image, ImageDraw, ImageTk
         light = v.r.opts.get("bg") == "light"
-        self.configure(bg=self._bg(v))
-        self.delete("all")
-        s = self.size
+        bg = self._bg(v)
+        self.configure(bg=bg)
+        s, k = self.size, self.SS
         c, R, br = s / 2, s / 2 - s * 0.13, s * 0.105
+        img = Image.new("RGB", (s * k, s * k), bg)
+        dr = ImageDraw.Draw(img)
+
+        def oval(x, y, r, fill=None, outline=None, width=0):
+            dr.ellipse((x * k - r * k, y * k - r * k, x * k + r * k, y * k + r * k), fill=fill, outline=outline,
+                       width=round(width * k))
+
         if self._hover is not None or self._press is not None:
-            self.create_oval(1, 1, s - 1, s - 1, fill="#c8c8cc" if light else "#3a3a40", outline="")
+            oval(c, c, s / 2 - 0.5, fill="#c8c8cc" if light else "#3a3a40")
         view_m = look_at(v.r.cam.eye(), v.r.cam.target)
         right, up, toward = view_m[0, :3], view_m[1, :3], view_m[2, :3]
         balls = []
@@ -1629,20 +1660,23 @@ class NavGizmo(tk.Canvas):
                 x, y = c + R * float(w @ right), c - R * float(w @ up)
                 balls.append((float(w @ toward), sign, name, col, x, y, tuple(w)))
         balls.sort(key=lambda b: b[0])  # far side first
+        font = self._pil_font(br * 1.25 * k)
         self._balls = []
         for depth, sign, name, col, x, y, w in balls:
             hot = self._hover == (name, sign)
             if sign > 0:
-                self.create_line(c, c, x, y, fill=col, width=max(2, s // 40))
-                self.create_oval(x - br, y - br, x + br, y + br, fill="#ffffff" if hot else col, outline="")
-                self.create_text(x, y + 0.5, text=name, font=self.font, fill="#101014" if not hot else col)
+                dr.line((c * k, c * k, x * k, y * k), fill=col, width=round(max(2.0, s / 40) * k))
+                oval(x, y, br, fill="#ffffff" if hot else col)
+                dr.text((x * k, y * k), name, font=font, fill=col if hot else "#101014", anchor="mm")
             else:
                 fill = _mix(col, "#ffffff" if light else "#000000", 0.55)
-                self.create_oval(x - br, y - br, x + br, y + br, fill=col if hot else fill, outline=col,
-                                 width=max(1, s // 64))
+                oval(x, y, br, fill=col if hot else fill, outline=col, width=max(1.2, s / 64))
                 if hot:
-                    self.create_text(x, y + 0.5, text="-" + name, font=self.font, fill="#101014")
+                    dr.text((x * k, y * k), "-" + name, font=font, fill="#101014", anchor="mm")
             self._balls.append((x, y, br, name, sign, w))
+        self._photo = ImageTk.PhotoImage(img.resize((s, s), Image.LANCZOS), master=self)
+        self.delete("all")
+        self.create_image(0, 0, image=self._photo, anchor="nw")
 
     def _hit(self, x, y):
         for bx, by, br, name, sign, w in reversed(self._balls):  # front-most first

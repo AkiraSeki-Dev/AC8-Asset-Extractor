@@ -3283,7 +3283,7 @@ class App(tk.Tk):
         self.glv = ac8_glview.GLView(self.view_host, bg=C["bg0"], on_error=self._view_fail,
                                      on_ready=self._view_ready)
         self.glv.on_fly = self._view_fly_changed
-        self.gizmo = ac8_glview.NavGizmo(self.glv, size=round(92 * SCALE), font=(F["bold"][0], 9, "bold"))
+        self.gizmo = ac8_glview.NavGizmo(self.glv, size=round(92 * SCALE), font_file=str(FONTS_DIR / "Outfit-Bold.ttf"))
         return self.glv
 
     def _view_ready(self, r):
