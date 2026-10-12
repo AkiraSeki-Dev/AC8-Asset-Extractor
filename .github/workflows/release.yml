@@ -79,8 +79,10 @@ jobs:
           TAG: ${{ steps.ver.outputs.tag }}
         run: |
           mkdir -p "/tmp/pkg/AC8 Asset Extractor"
-          # the launcher's source stays in the repo; the zip gets the built exe
-          tar cf - --exclude=./.git --exclude=./.github --exclude=./.gitignore --exclude=./launcher . \
+          # only what the app needs to run (plus the licence / notice files the bundled tools and font require);
+          # the launcher's source and the READMEs stay in the repo
+          tar cf - --exclude=./.git --exclude=./.github --exclude=./.gitignore --exclude=./launcher \
+            --exclude=./README.md "--exclude=./AC8 Unpacker/README.md" --exclude=notes.md --exclude=__pycache__ . \
             | tar xf - -C "/tmp/pkg/AC8 Asset Extractor"
           (cd /tmp/pkg && zip -qr "$GITHUB_WORKSPACE/AC8_Asset_Extractor_${TAG}.zip" "AC8 Asset Extractor")
           python3 .github/scripts/release_notes.py "$TAG" > notes.md

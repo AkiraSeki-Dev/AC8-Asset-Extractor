@@ -1603,8 +1603,10 @@ class App(tk.Tk):
         rel.pack(side="left")
         rel.bind("<Button-1>", lambda e: __import__("webbrowser").open(__import__("ac8_update").RELEASES_PAGE))
         Button(row, "Check for updates", self.update_app, font=F["small"], padx=10, pady=4).pack(side="right")
-        tk.Label(box, text="For modding, research and educational use only. Extracted assets remain the property of "
-                           "their copyright holders — don't redistribute them.", bg=C["bg1"], fg=C["text3"],
+        tk.Label(box, text="Disclaimer: This tool is intended for legitimate modding, research, and educational use "
+                           "only. Unauthorized redistribution, commercial exploitation, and misuse of copyrighted "
+                           "assets are not supported. All extracted assets remain the property of their respective "
+                           "copyright holders.", bg=C["bg1"], fg=C["text3"],
                  font=F["small"], anchor="w", justify="left", wraplength=round(720 * SCALE)).pack(fill="x", pady=(4, 0))
         box = section("SETUP")
         for text, var, btext, cmd in (("Tools", self.v_tools, "Check for updates", self.fetch_tools),
