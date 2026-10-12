@@ -1124,9 +1124,36 @@ class App(tk.Tk):
         self.cards_win = self.canvas.create_window(0, 0, window=self.cards, anchor="nw")
         self.cards.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
         self.canvas.bind("<Configure>", lambda e: self.canvas.itemconfigure(self.cards_win, width=e.width))
+        # A divider (PanedWindow sash) shows the resize cursor while the mouse is over it and puts it back when the
+        # mouse leaves. When a tab's layout appears under the mouse, Windows doesn't always report that "leave", and
+        # the resize cursor stays stuck over the whole catalog: put it back as soon as the mouse enters anything else.
+        self.bind_all("<Enter>", self._unstick_sash_cursor, add="+")
         self.bind_all("<MouseWheel>", lambda e: self._scroll(-1 if e.delta > 0 else 1, e))
         self.bind_all("<Button-4>", lambda e: self._scroll(-1, e))
         self.bind_all("<Button-5>", lambda e: self._scroll(1, e))
+
+    def _unstick_sash_cursor(self, e=None):
+        if e is not None and isinstance(e.widget, tk.PanedWindow):
+            return  # over a divider itself: leave its cursor alone
+        for pw in (getattr(self, "body", None), getattr(self, "cat_split", None)):
+            if pw is None:
+                continue
+            try:
+                # what Tk itself does once it sees the mouse has left the divider: restore the saved cursor and
+                # forget it (works the same in Tk 8.6 and 9)
+                self.tk.eval(f"""
+                    if {{[info exists ::tk::Priv({pw},panecursor)]}} {{
+                        {pw} configure -cursor $::tk::Priv({pw},panecursor)
+                        unset ::tk::Priv({pw},panecursor)
+                        if {{[info exists ::tk::Priv({pw},pwAfterId)]}} {{
+                            after cancel $::tk::Priv({pw},pwAfterId)
+                            unset ::tk::Priv({pw},pwAfterId)
+                        }}
+                    }}""")
+                if str(pw.cget("cursor")):  # our dividers never set a cursor of their own
+                    pw.configure(cursor="")
+            except tk.TclError:
+                pass
 
     def _scroll(self, direction, e):
         w = self.winfo_containing(e.x_root, e.y_root)
@@ -2562,6 +2589,7 @@ class App(tk.Tk):
         self.tab = key
         for k, lbl in self.tab_labels.items():
             lbl.configure(fg=C["accent"] if k == key else C["text3"])
+        self.after_idle(self._unstick_sash_cursor)
         if key == "catalog":
             self.refresh_catalog()
         elif key == "textures":
