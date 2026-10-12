@@ -9,6 +9,9 @@ Unicode true
 !ifndef VERSION
   !define VERSION "0.0"
 !endif
+!ifndef VERSION4
+  !define VERSION4 "${VERSION}.0.0"   ; Windows file version: exactly four numbers (the build passes it)
+!endif
 !ifndef SRC
   !error "pass -DSRC=<folder to install>"
 !endif
@@ -29,7 +32,7 @@ SetCompressor /SOLID lzma
 SetCompressorDictSize 64
 BrandingText "${APPNAME} ${VERSION}"
 
-VIProductVersion "${VERSION}.0.0"
+VIProductVersion "${VERSION4}"
 VIAddVersionKey "ProductName" "${APPNAME}"
 VIAddVersionKey "FileDescription" "${APPNAME} installer"
 VIAddVersionKey "ProductVersion" "${VERSION}"

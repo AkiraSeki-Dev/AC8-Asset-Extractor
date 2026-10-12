@@ -1,5 +1,6 @@
 # Publishes a release whenever main has an APP_VERSION (in app/AC8_Asset_Extractor.py) that has no release yet:
-# bump the version, push, and v<APP_VERSION> appears on the Releases page with AC8_Asset_Extractor_v<X.Y>.zip —
+# bump the version, push, and release v<APP_VERSION> (titled just "<APP_VERSION>", e.g. 1.2.1) appears on the
+# Releases page with AC8_Asset_Extractor_v<version>_Setup.exe and AC8_Asset_Extractor_v<version>.zip —
 # the file the app's updater (Settings → APP → Check for updates) downloads. Can also be run by hand from the
 # Actions tab (Release → Run workflow); a version that already has a release is skipped.
 name: Release
@@ -115,7 +116,9 @@ jobs:
           du -sh /tmp/inst/python
           sudo apt-get install -y -q nsis >/dev/null
           v="${TAG#v}"
-          makensis -V2 -DVERSION="$v" -DSRC=/tmp/inst \
+          # Windows wants exactly four numbers for the file version: 1.2 -> 1.2.0.0, 1.2.1 -> 1.2.1.0
+          v4=$(python3 -c "import sys; p=(sys.argv[1].split('.') + ['0']*4)[:4]; print('.'.join(p))" "$v")
+          makensis -V2 -DVERSION="$v" -DVERSION4="$v4" -DSRC=/tmp/inst \
             "-DOUT=$GITHUB_WORKSPACE/AC8_Asset_Extractor_${TAG}_Setup.exe" installer/ac8.nsi
           ls -la "$GITHUB_WORKSPACE/AC8_Asset_Extractor_${TAG}_Setup.exe"
 
@@ -126,4 +129,4 @@ jobs:
           TAG: ${{ steps.ver.outputs.tag }}
         run: |
           gh release create "$TAG" "AC8_Asset_Extractor_${TAG}_Setup.exe" "AC8_Asset_Extractor_${TAG}.zip" \
-            --title "AC8 Asset Extractor $TAG" --notes-file notes.md --target "$GITHUB_SHA"
+            --title "${TAG#v}" --notes-file notes.md --target "$GITHUB_SHA"
