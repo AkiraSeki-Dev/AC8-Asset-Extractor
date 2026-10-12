@@ -25,6 +25,7 @@ import (
 const (
 	appName        = "ACE Combat 8 Asset Extractor"
 	scriptName     = "AC8_Asset_Extractor.py"
+	codeDir        = "app" // the scripts live in app\ next to this exe
 	createNoWindow = 0x08000000
 	mbIconError    = 0x10
 	mbIconWarning  = 0x30
@@ -120,10 +121,10 @@ func main() {
 		return
 	}
 	appDir := filepath.Dir(exe)
-	script := filepath.Join(appDir, scriptName)
+	script := filepath.Join(appDir, codeDir, scriptName)
 	if !exists(script) {
-		messageBox(fmt.Sprintf("%s was not found next to this program.\n\nKeep the .exe in the AC8 Asset Extractor folder "+
-			"(the one with %s, ac8_textures.py and the AC8 Unpacker folder).", scriptName, scriptName), mbIconError)
+		messageBox(fmt.Sprintf("%s\\%s was not found next to this program.\n\nKeep the .exe in the AC8 Asset Extractor "+
+			"folder (the one with the app and AC8 Unpacker folders).", codeDir, scriptName), mbIconError)
 		return
 	}
 

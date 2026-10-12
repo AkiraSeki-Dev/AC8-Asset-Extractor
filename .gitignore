@@ -7,6 +7,7 @@ AC8 Unpacker/tools/versions.json
 AC8 Unpacker/tools/*-LICENSE*
 
 # your own data — never commit
+data/
 AC8 Unpacker/aes-key.txt
 ac8_extractor_settings.json
 asset_index.txt

@@ -18,7 +18,7 @@ RELEASES_PAGE = f"https://github.com/{REPO}/releases"
 LAUNCHER = "AC8 Asset Extractor.exe"
 
 # paths (relative to the app folder, lower case, forward slashes) an update never overwrites
-KEEP = ("ac8_extractor_settings.json", "asset_index.txt", "asset_history.json", "ac8_exports/", "logs/",
+KEEP = ("data/", "ac8_extractor_settings.json", "asset_index.txt", "asset_history.json", "ac8_exports/", "logs/",
         "ac8 unpacker/aes-key.txt", "ac8 unpacker/tools/")
 
 
@@ -86,7 +86,8 @@ def install(app_dir, url, log=print):
             tmp.write_bytes(payload)
             os.replace(tmp, dest)
             n += 1
-    shutil.rmtree(app_dir / "__pycache__", ignore_errors=True)
+    for cache in (app_dir / "__pycache__", app_dir / "app" / "__pycache__"):
+        shutil.rmtree(cache, ignore_errors=True)
     log(f"  ✔ {n} files updated")
     return n
 

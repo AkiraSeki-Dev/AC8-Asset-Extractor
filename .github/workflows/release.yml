@@ -1,4 +1,4 @@
-# Publishes a release whenever main has an APP_VERSION (in AC8_Asset_Extractor.py) that has no release yet:
+# Publishes a release whenever main has an APP_VERSION (in app/AC8_Asset_Extractor.py) that has no release yet:
 # bump the version, push, and v<APP_VERSION> appears on the Releases page with AC8_Asset_Extractor_v<X.Y>.zip —
 # the file the app's updater (Settings → APP → Check for updates) downloads. Can also be run by hand from the
 # Actions tab (Release → Run workflow); a version that already has a release is skipped.
@@ -8,7 +8,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "AC8_Asset_Extractor.py"
+      - "app/AC8_Asset_Extractor.py"
       - ".github/workflows/release.yml"
   workflow_dispatch:
 
@@ -30,7 +30,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          v=$(python3 -c "import re; print(re.search(r'APP_VERSION = \"([^\"]+)\"', open('AC8_Asset_Extractor.py', encoding='utf-8').read()).group(1))")
+          v=$(python3 -c "import re; print(re.search(r'APP_VERSION = \"([^\"]+)\"', open('app/AC8_Asset_Extractor.py', encoding='utf-8').read()).group(1))")
           echo "tag=v$v" >> "$GITHUB_OUTPUT"
           if gh release view "v$v" >/dev/null 2>&1; then
             echo "v$v already has a release — nothing to do."
@@ -42,7 +42,7 @@ jobs:
 
       - name: Check the code
         if: steps.ver.outputs.skip == 'false'
-        run: python3 -m py_compile *.py "AC8 Unpacker/ac8_unpack.py"
+        run: python3 -m py_compile app/*.py "AC8 Unpacker/ac8_unpack.py"
 
       - uses: actions/setup-go@v5
         if: steps.ver.outputs.skip == 'false'
@@ -79,7 +79,9 @@ jobs:
           TAG: ${{ steps.ver.outputs.tag }}
         run: |
           mkdir -p "/tmp/pkg/AC8 Asset Extractor"
-          tar cf - --exclude=./.git --exclude=./.github --exclude=./.gitignore . | tar xf - -C "/tmp/pkg/AC8 Asset Extractor"
+          # the launcher's source stays in the repo; the zip gets the built exe
+          tar cf - --exclude=./.git --exclude=./.github --exclude=./.gitignore --exclude=./launcher . \
+            | tar xf - -C "/tmp/pkg/AC8 Asset Extractor"
           (cd /tmp/pkg && zip -qr "$GITHUB_WORKSPACE/AC8_Asset_Extractor_${TAG}.zip" "AC8 Asset Extractor")
           python3 .github/scripts/release_notes.py "$TAG" > notes.md
           cat notes.md

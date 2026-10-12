@@ -1,4 +1,16 @@
-# ACE Combat 8 Asset Extractor
+# AC8 Asset Extractor — Ace Combat 8
+
+A utility designed to extract and organize game assets from Ace Combat 8 for modding, research, and educational
+purposes. The tool aims to simplify asset extraction and inspection, allowing users to explore aircraft models,
+textures, and other game resources for personal projects and technical analysis.
+
+> **Disclaimer:** This tool is intended for legitimate modding, research, and educational use only. Unauthorized
+> redistribution, commercial exploitation, and misuse of copyrighted assets are not supported. All extracted assets
+> remain the property of their respective copyright holders.
+
+**Download:** the latest version is on the [Releases page](https://github.com/AkiraSeki-Dev/AC8-Asset-Extractor/releases/latest)
+— unzip it anywhere and double-click `AC8 Asset Extractor.exe`. Updates install from inside the app (Settings → APP →
+Check for updates).
 
 Browse ACE COMBAT 8's assets, tick what you want, and extract it in one click: textures come out as `.png`,
 3D models as `.glb` (with skeleton, skin weights, materials and textures), and optionally as `.fbx`.
@@ -11,7 +23,7 @@ Browse ACE COMBAT 8's assets, tick what you want, and extract it in one click: t
 | 2c. FBX (optional) | `ac8_fbx.py` (built in) | `.glb` | `.fbx` → `2_Final_Export\FBX` |
 | 2d. PBR (optional) | `ac8_pbr.py` | the exported PNGs | standard PBR maps + AO → `2_Final_Export\PBR…` |
 
-Plus a built-in **3D viewer** (`ac8_glview.py`), an **aircraft & weapons catalog**, and a **texture browser** — see below.
+(The scripts are in the `app` folder.) Plus a built-in **3D viewer** (`ac8_glview.py`), an **aircraft & weapons catalog**, and a **texture browser** — see below.
 
 **Textures:** normal textures and *virtual textures* (the big UDIM aircraft liveries). A UDIM texture becomes one
 PNG per tile: `T_PP0023_f14d_001_C.1001.png`, `.1002.png` …
@@ -42,7 +54,7 @@ Presets: **Separate maps** (BaseColor, Normal, Metallic, Roughness, AO — Blend
 OpenGL or DirectX style (preset default, or pick one). UDIM tiles are named `name_Map.1001.png`. The game's own
 baked AO is used — no baking needed. The GLB files also get this AO.
 
-Each tool also works on its own:
+Each tool also works on its own (from the `app` folder):
 `python ac8_textures.py <raw> <out> [--max-texture 2048]`, `python ac8_gltf.py <raw> <out> [--max-texture 2048]`,
 `python ac8_pbr.py <png folder> <out> --preset unreal`, `python ac8_fbx.py <glb or folder> <out>`,
 `python ac8_livery.py <raw> <final>`, `python ac8_viewer.py <file.glb or folder>` (web viewer).
@@ -51,7 +63,21 @@ Each tool also works on its own:
 
 Double-click **`AC8 Asset Extractor.exe`**. It's a small launcher that starts the app with no console window and
 shows an error box if Python or a package is missing. It needs Python 3.10+ installed (and stays in this folder).
-`python AC8_Asset_Extractor.py` still works too.
+`python app\AC8_Asset_Extractor.py` works too.
+
+### What's in the folder
+
+```
+AC8 Asset Extractor.exe   the launcher — double-click this
+app\                      the program: Python scripts, fonts, icons, web viewer
+AC8 Unpacker\             key finder + retoc / repak (the unpacking tools) in tools\
+data\                     your settings, asset list and game-update history (made on first start)
+logs\                     one log per session (Logs folder link, bottom right)
+AC8_Exports\              your extractions (or wherever Settings → Exports folder points)
+```
+
+Updates replace `app\`, the launcher and the unpacker script; `data\`, `logs\`, `AC8_Exports\`, your AES key and the
+tools are never touched.
 
 ### Rebuilding the .exe
 
@@ -68,9 +94,11 @@ If anything is missing, an orange **Setup needed** bar tells you what. Click **S
 
 - **Install packages** — Pillow and numpy (converters), pycryptodome (Find key), PyOpenGL and pyopengltk
   (the 3D viewer).
-- **Download tools** — only if retoc/repak are missing.
-- **AES key** — filled from `AC8 Unpacker\aes-key.txt`. After a game update, start the game without anti-cheat
-  and click **Find key** (see the unpacker README).
+- **Tools → Check for updates** — installs or updates retoc / repak (downloaded automatically on first start).
+- **APP → Check for updates** — updates the app itself from this repo's releases.
+- **AES key** — filled from `AC8 Unpacker\aes-key.txt`. The first time (and after a game update that changes it)
+  click **Start game offline**, wait for the title screen, then **Find key**; afterwards **Remove offline launch
+  option** so the game starts normally.
 - **Game folder** — found through Steam automatically. **Exports folder** — where extraction folders go.
 - **Max texture size** — per texture / per UDIM tile (default Full size; pick 2048 px for much smaller files).
 - **Also make PBR maps** — run the PBR converter automatically after each convert (default: Separate maps).
@@ -172,7 +200,17 @@ Free-fly extras: **Shift+wheel** changes the WASD fly speed, **Alt+wheel** narro
 next to the model (twice the on-screen size). With several models (View 3D on an extraction), pick one in
 **Model**.
 
-## Updating from an older version
+## Version history
+
+v1.0: first public release. Everything below in one package: one-click extraction of textures (PNG, incl. UDIM
+virtual textures), meshes (GLB with skeleton and materials, FBX without Blender) and PBR maps in seven presets
+(Separate, Unreal, Unity HDRP / URP, glTF, DCS World); a catalog of every aircraft, weapon, character (named where
+known) and other area; a texture browser; a native 3D viewer with the game's own liveries, emblems and tail numbers,
+a livery editor and baked texture export; offline start and key finding through Steam; and updaters for the app and
+for retoc / repak. The scripts now live in `app\` and your settings / asset list in `data\` (moved there
+automatically from an older version's folder).
+
+### Development builds (before the first public release)
 
 v2.38: the app updates itself from GitHub (AkiraSeki-Dev/AC8-Asset-Extractor): Settings → APP → **Check for
 updates** downloads the newest release, copies it over the app folder (your settings, asset list, exports, logs, AES
@@ -437,15 +475,16 @@ If you make one, send it over and the catalog can read the real loadouts instead
 - In each aircraft folder: `SK_…` is the main airframe (moving parts as bones), `SK_…_CP` the cockpit version,
   `SK_…_DAM` damaged versions, `SM_…_SWP*` weapon pylon sets, `SM_…_GearOn/Off` gear, `DPTK` drop tanks.
 - Materials, animations, audio, blueprints… are unpacked into `1_Raw_UAssets` but not converted.
-- Previews pile up in `AC8_Exports\_Previews\` — delete that folder any time to free space.
+- 3D previews are cleared when the app closes (Settings → 3D previews to keep them instead).
 - Anything that can't be converted gets a line in the log; the rest of the extraction carries on.
-- Settings (game folder, exports folder, dropdowns) are remembered in `ac8_extractor_settings.json`.
+- Settings (game folder, exports folder, dropdowns) are remembered in `data\ac8_extractor_settings.json`.
 
-For offline single-player modding of a copy you own. Don't redistribute extracted game content.
+For offline single-player modding of a copy you own. Don't redistribute extracted game content (see the disclaimer
+at the top).
 
-The bundled Outfit font (`fonts\`) is SIL Open Font License; it is loaded by the app only, nothing is installed.
-Logo and icon: the Wings of Theve wing, in `assets\`.
-three.js (viewer) is MIT licensed, in `viewer\lib\`.
+The bundled Outfit font (`app\fonts\`) is SIL Open Font License; it is loaded by the app only, nothing is installed.
+Logo and icon: the Wings of Theve wing, in `app\assets\`.
+three.js (viewer) is MIT licensed, in `app\viewer\lib\`.
 
 
 ## Credits

@@ -39,13 +39,15 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # sibling ac8_* 
 import ac8_catalog as catalog  # noqa: E402  (pure python, no extra packages)
 
 APP_NAME = "ACE Combat 8 Asset Extractor"
-APP_VERSION = "2.38"
-HERE = Path(__file__).resolve().parent
-SETTINGS_FILE = HERE / "ac8_extractor_settings.json"
-INDEX_FILE = HERE / "asset_index.txt"
-HISTORY_FILE = HERE / "asset_history.json"   # files that appeared in each game update (found by Scan Game)
-FONTS_DIR = HERE / "fonts"
-ASSETS_DIR = HERE / "assets"
+APP_VERSION = "1.0"
+CODE = Path(__file__).resolve().parent         # app/: the scripts and their fonts, icons and web viewer
+HERE = CODE.parent                             # the app folder (the exe, app/, AC8 Unpacker/, data/, logs/)
+DATA_DIR = HERE / "data"                       # your own files: settings, asset list, update history
+SETTINGS_FILE = DATA_DIR / "ac8_extractor_settings.json"
+INDEX_FILE = DATA_DIR / "asset_index.txt"
+HISTORY_FILE = DATA_DIR / "asset_history.json"   # files that appeared in each game update (found by Scan Game)
+FONTS_DIR = CODE / "fonts"
+ASSETS_DIR = CODE / "assets"
 
 RAW_DIR_NAME = "1_Raw_UAssets"
 FINAL_DIR_NAME = "2_Final_Export"
@@ -145,12 +147,12 @@ def _find_folder(marker, preferred):
 
 
 UNPACKER_DIR = _find_folder("ac8_unpack.py", "AC8 Unpacker")
-TEXTURE_CONVERTER = HERE / "ac8_textures.py"  # cooked texture -> PNG (incl. virtual/UDIM textures)
-MESH_CONVERTER = HERE / "ac8_gltf.py"         # cooked static/skeletal mesh -> GLB with skeleton + textures
-FBX_CONVERTER = HERE / "ac8_fbx.py"           # GLB -> FBX, built in (no Blender needed)
-LIVERY_SCRIPT = HERE / "ac8_livery.py"         # aircraft liveries -> 2_Final_Export/Liveries/<aircraft>.json
-VIEWER_SCRIPT = HERE / "ac8_viewer.py"         # web viewer (only for "Open in browser")
-PBR_SCRIPT = HERE / "ac8_pbr.py"               # packed textures -> PBR maps + AO
+TEXTURE_CONVERTER = CODE / "ac8_textures.py"  # cooked texture -> PNG (incl. virtual/UDIM textures)
+MESH_CONVERTER = CODE / "ac8_gltf.py"         # cooked static/skeletal mesh -> GLB with skeleton + textures
+FBX_CONVERTER = CODE / "ac8_fbx.py"           # GLB -> FBX, built in (no Blender needed)
+LIVERY_SCRIPT = CODE / "ac8_livery.py"         # aircraft liveries -> 2_Final_Export/Liveries/<aircraft>.json
+VIEWER_SCRIPT = CODE / "ac8_viewer.py"         # web viewer (only for "Open in browser")
+PBR_SCRIPT = CODE / "ac8_pbr.py"               # packed textures -> PBR maps + AO
 PREVIEW_DIR_NAME = "_Previews"
 MESH_FORMAT = "5"  # bump when the GLB output changes, so cached previews are rebuilt (5 = 2nd UV set for decals)
 PBR_PRESETS = [("off", "Off"), ("separate", "Separate maps (Blender / Substance)"), ("unreal", "Unreal (ORM)"),
@@ -201,13 +203,32 @@ TEXTURE_SIZES = [("1024", "1024 px"), ("2048", "2048 px"), ("4096", "4096 px"), 
 
 
 # files from older versions that nothing uses any more — removed at start-up so the folder stays tidy
-OBSOLETE = ["ac8_shaders.py", "ac8_embed.py", "ac8_blender_fbx.py", "AC8 uasset extractor", "Start AC8 Asset Extractor.bat",
+# the flat layout before v1.0 had every script, plus assets/ fonts/ viewer/, in the root folder
+OLD_ROOT_FILES = ["AC8_Asset_Extractor.py", "ac8_catalog.py", "ac8_fbx.py", "ac8_gltf.py", "ac8_glview.py",
+                  "ac8_livery.py", "ac8_mesh.py", "ac8_package.py", "ac8_pbr.py", "ac8_skins.py", "ac8_steam.py",
+                  "ac8_textures.py", "ac8_tools.py", "ac8_update.py", "ac8_viewer.py", "ac8_vt.py", "assets", "fonts",
+                  "viewer", "__pycache__"]
+OBSOLETE = OLD_ROOT_FILES + ["ac8_shaders.py", "ac8_embed.py", "ac8_blender_fbx.py", "AC8 uasset extractor", "Start AC8 Asset Extractor.bat",
             "AC8 Unpacker/.gitignore", "AC8 Unpacker/requirements.txt", "AC8 Unpacker/out"]
+
+
+def move_user_data():
+    """Before v1.0 the settings, asset list and history sat in the root folder: move them into data/."""
+    DATA_DIR.mkdir(exist_ok=True)
+    for f in (SETTINGS_FILE, INDEX_FILE, HISTORY_FILE):
+        old = HERE / f.name
+        if old.exists() and not f.exists():
+            try:
+                old.replace(f)
+            except OSError:
+                pass
 
 
 def remove_obsolete():
     removed = []
-    for rel in OBSOLETE:
+    # older downloads also carried the launcher's Go source; keep it only in a developer's git checkout
+    extra = [] if (HERE / ".git").exists() else ["launcher"]
+    for rel in OBSOLETE + extra:
         p = HERE / rel
         try:
             if p.is_dir():
@@ -1507,7 +1528,8 @@ class App(tk.Tk):
         w = tk.Toplevel(self, bg=C["bg0"])
         self.settings_win = w
         w.title("Settings")
-        w.geometry(f"{round(800 * SCALE)}x{round(600 * SCALE)}")
+        sw, sh = round(800 * SCALE), min(round(800 * SCALE), self.winfo_screenheight() - 80)
+        w.geometry(f"{sw}x{sh}")
         w.transient(self)
         pad = tk.Frame(w, bg=C["bg0"], padx=22, pady=18)
         pad.pack(fill="both", expand=True)
@@ -1581,6 +1603,9 @@ class App(tk.Tk):
         rel.pack(side="left")
         rel.bind("<Button-1>", lambda e: __import__("webbrowser").open(__import__("ac8_update").RELEASES_PAGE))
         Button(row, "Check for updates", self.update_app, font=F["small"], padx=10, pady=4).pack(side="right")
+        tk.Label(box, text="For modding, research and educational use only. Extracted assets remain the property of "
+                           "their copyright holders — don't redistribute them.", bg=C["bg1"], fg=C["text3"],
+                 font=F["small"], anchor="w", justify="left", wraplength=round(720 * SCALE)).pack(fill="x", pady=(4, 0))
         box = section("SETUP")
         for text, var, btext, cmd in (("Tools", self.v_tools, "Check for updates", self.fetch_tools),
                                       ("Python packages", self.v_pkgs, "Install packages", self.install_packages)):
@@ -1598,7 +1623,7 @@ class App(tk.Tk):
         foot.pack(fill="x", pady=(6, 0))
         Button(foot, "Done", lambda: self._close_settings(w), variant="primary", padx=18).pack(side="right")
         w.protocol("WM_DELETE_WINDOW", lambda: self._close_settings(w))
-        center_on(w, self, (round(800 * SCALE), round(600 * SCALE)))
+        center_on(w, self, (sw, sh))
 
     def _on_fbx_toggle(self):
         pass  # FBX is written by the app itself (ac8_fbx.py) — nothing to check
@@ -1910,8 +1935,8 @@ class App(tk.Tk):
             if not self._paks_dir():
                 problems.append("Game folder not found. Settings → Game folder.")
         if need_convert:
-            for f in (TEXTURE_CONVERTER, MESH_CONVERTER, HERE / "ac8_mesh.py", HERE / "ac8_vt.py",
-                      HERE / "ac8_package.py"):
+            for f in (TEXTURE_CONVERTER, MESH_CONVERTER, CODE / "ac8_mesh.py", CODE / "ac8_vt.py",
+                      CODE / "ac8_package.py"):
                 if not f.exists():
                     problems.append(f"{f.name} is missing next to this app.")
             conv = [p for p in self._missing_pkgs if p in ("Pillow", "numpy")]
@@ -4689,6 +4714,7 @@ if __name__ == "__main__":
         __import__("traceback").format_exception(t, v, tb)).rstrip())
     threading.excepthook = lambda a: SLOG.write(f"Unhandled in thread {a.thread.name if a.thread else '?'}: " + "".join(
         __import__("traceback").format_exception(a.exc_type, a.exc_value, a.exc_traceback)).rstrip())
+    move_user_data()  # before App() reads the settings / asset list / history
     load_private_fonts()
     app = App()
     app.report_callback_exception = lambda t, v, tb: SLOG.write("Error in the window: " + "".join(
