@@ -118,6 +118,18 @@ AC8 Asset Extractor\
 
 ## Version history
 
+v1.2.2: bone posing, faster extraction and a tidier viewer.
+- **Bones:** click a bone in the 3D view, then **G** (translate) or **R** (rotate) and drag the arrows / rings, in
+  the bone's own X / Y / Z. Exact Translation / Rotation numbers (and rotation sliders) in the Bones panel,
+  **Alt+G** / **Alt+R** to reset, **.** to look at the selected bone.
+- **Faster extraction:** textures, meshes and PBR maps convert on all your CPU cores; meshes no longer re-make
+  shared textures for every part (an F-14 went from about 2.5 min to under 30 s for its meshes).
+- The axis circle, frame button and bone tools are see-through, drawn inside the view like Blender's.
+- Dropdowns open a dark list in the app's style (one scrolling column, e.g. the livery list).
+- The app checks for app / retoc / repak updates every time it starts and shows a bar with update buttons.
+- Settings → APP → Support: a Ko-fi link, if you'd like to support the app.
+- Clean-up of unused code; the README was checked and corrected.
+
 v1.2.1: a better 3D viewer and catalog.
 - Viewer controls work like Blender: middle-drag rotate, Shift+middle-drag pan, wheel zoom. **Ctrl+F** (or
   Shift+`) turns on free fly: mouse look, W A S D, Q down, E up; left-click or Esc to stop. The **Controls** button
