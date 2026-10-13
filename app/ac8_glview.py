@@ -1682,15 +1682,16 @@ class NavGizmo(tk.Canvas):
         if self.on_frame:  # frame button: corner brackets around a dot
             hot = self._hover is not None and self._hover[0] == "frame"
             fy, b = s + self.gap + self.btn / 2, self.btn
-            oval(c, fy, b / 2 - 0.5, fill=("#b4b4ba" if hot else "#d4d4d8") if light else ("#4a4a52" if hot else "#2c2c32"))
+            fx = s - b / 2 - 0.5  # right-aligned with the circle above
+            oval(fx, fy, b / 2 - 0.5, fill=("#b4b4ba" if hot else "#d4d4d8") if light else ("#4a4a52" if hot else "#2c2c32"))
             ink = "#202024" if light else "#e8e8ec"
             h, L, lw = b * 0.24, b * 0.11, max(1.4, b / 18) * k
             for sx in (-1, 1):
                 for sy in (-1, 1):
-                    x0, y0 = (c + sx * h) * k, (fy + sy * h) * k
+                    x0, y0 = (fx + sx * h) * k, (fy + sy * h) * k
                     dr.line((x0, y0, x0 - sx * L * k, y0), fill=ink, width=round(lw))
                     dr.line((x0, y0, x0, y0 - sy * L * k), fill=ink, width=round(lw))
-            oval(c, fy, b * 0.07, fill=ink)
+            oval(fx, fy, b * 0.07, fill=ink)
         view_m = look_at(v.r.cam.eye(), v.r.cam.target)
         right, up, toward = view_m[0, :3], view_m[1, :3], view_m[2, :3]
         balls = []
@@ -1719,7 +1720,7 @@ class NavGizmo(tk.Canvas):
         self.create_image(0, 0, image=self._photo, anchor="nw")
 
     def _hit(self, x, y):
-        if self.on_frame and (x - self.size / 2) ** 2 + (y - self.size - self.gap - self.btn / 2) ** 2 <= \
+        if self.on_frame and (x - self.size + self.btn / 2) ** 2 + (y - self.size - self.gap - self.btn / 2) ** 2 <= \
                 (self.btn / 2) ** 2:
             return "frame", 0, None
         for bx, by, br, name, sign, w in reversed(self._balls):  # front-most first
