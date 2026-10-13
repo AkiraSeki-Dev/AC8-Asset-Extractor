@@ -231,7 +231,21 @@ def _write_plain(uasset_path, out_png, max_size):
     raise TextureError("no mip data available")
 
 
-JOBS = max(1, min(os.cpu_count() or 2, 8))  # textures converted at once (decoding and PNG writing run in parallel)
+def cpu_jobs():
+    """How many things to convert at once: every CPU core this process may use (on 5+ cores one is left free, so
+    the app and the rest of the PC stay responsive)."""
+    try:
+        n = os.process_cpu_count()  # Python 3.13+: honours CPU affinity / limits
+    except AttributeError:
+        try:
+            n = len(os.sched_getaffinity(0))  # Linux
+        except AttributeError:
+            n = os.cpu_count()
+    n = n or 2
+    return n - 1 if n > 4 else n
+
+
+JOBS = cpu_jobs()  # textures converted at once (decoding and PNG writing run in parallel)
 
 
 def convert_folder(raw_dir, out_dir, log=print, max_size=0, jobs=JOBS):

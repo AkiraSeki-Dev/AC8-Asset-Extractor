@@ -567,7 +567,7 @@ def build_glb(mesh, lib, out_path, log=print):
     return len(prims), len(glb.j.get("images", []))
 
 
-JOBS = max(1, min(os.cpu_count() or 2, 8))  # meshes converted at once (they share one texture cache)
+JOBS = at.JOBS  # meshes converted at once (they share one texture cache)
 
 
 def convert_folder(raw_dir, out_dir, max_texture=2048, log=print, jobs=JOBS):

@@ -182,7 +182,8 @@ def write_set(maps, out_dir, name, preset, normal_conv=None, tile=None):
     return written
 
 
-JOBS = max(1, min(os.cpu_count() or 2, 8))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from ac8_textures import JOBS  # noqa: E402  (all the CPU cores)
 
 
 def convert_folder(src, out, preset="separate", normal_conv=None, only=None, log=print, jobs=JOBS):
