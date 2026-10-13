@@ -306,7 +306,7 @@ def encode(img, kind):
 class GLB:
     def __init__(self):
         self.bin = bytearray()
-        self.j = {"asset": {"version": "2.0", "generator": "ACE Combat 8 Asset Extractor"},
+        self.j = {"asset": {"version": "2.0", "generator": "Ace Combat 8 Asset Extractor"},
                   "scenes": [{"nodes": []}], "scene": 0, "nodes": [], "meshes": [], "materials": [],
                   "accessors": [], "bufferViews": [], "buffers": [], "textures": [], "images": [],
                   "samplers": [{"magFilter": 9729, "minFilter": 9987, "wrapS": 10497, "wrapT": 10497}]}

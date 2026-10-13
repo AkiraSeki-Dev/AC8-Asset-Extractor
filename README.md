@@ -120,6 +120,11 @@ AC8 Asset Extractor\
 
 ## Version history
 
+v1.2.5: small fixes.
+- Dropdown lists (e.g. the livery list) close when the app window is moved, resized or minimised, or when you
+  click another program, instead of staying behind on the screen.
+- The game's name is written "Ace Combat 8" everywhere in the app.
+
 v1.2.4: fixes for more than one monitor.
 - Dropdown lists (e.g. the livery list) open under their box on the monitor the app is on, instead of jumping to
   the main monitor.

@@ -1,6 +1,6 @@
 # ac8-unpacker
 
-Unpack the encrypted `.pak` and `.utoc/.ucas` containers of ACE COMBAT 8: WINGS OF THEVE (Steam, Windows).
+Unpack the encrypted `.pak` and `.utoc/.ucas` containers of Ace Combat 8: Wings of Theve (Steam, Windows).
 
 The script finds the pak AES-256 key in your own running copy of the game, then drives
 [repak](https://github.com/trumank/repak) and [retoc](https://github.com/trumank/retoc) to list and extract files.

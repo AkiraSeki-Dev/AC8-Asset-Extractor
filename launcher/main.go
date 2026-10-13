@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	appName        = "ACE Combat 8 Asset Extractor"
+	appName        = "Ace Combat 8 Asset Extractor"
 	scriptName     = "AC8_Asset_Extractor.py"
 	codeDir        = "app" // the scripts live in app\ next to this exe
 	createNoWindow = 0x08000000

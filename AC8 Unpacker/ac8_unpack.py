@@ -1,4 +1,4 @@
-"""ACE COMBAT 8: WINGS OF THEVE pak unpacker.
+"""Ace Combat 8: Wings of Theve pak unpacker.
 
 Finds the pak AES-256 key in your own running copy of the game and drives repak and retoc
 to list and extract the encrypted .pak and .utoc/.ucas containers.
@@ -285,7 +285,7 @@ def cmd_extract_pak(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="ACE COMBAT 8 pak unpacker")
+    parser = argparse.ArgumentParser(description="Ace Combat 8 pak unpacker")
     parser.add_argument("--game-dir", help="game folder (the one with start_protected_game.exe)")
     parser.add_argument("--key", help="AES key as 0x + 64 hex digits (default: aes-key.txt)")
     sub = parser.add_subparsers(dest="command", required=True)

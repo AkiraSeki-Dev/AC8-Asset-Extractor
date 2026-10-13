@@ -1,4 +1,4 @@
-"""Cooked UE5 texture -> PNG converter for ACE COMBAT 8 (works on retoc 'to-legacy' output).
+"""Cooked UE5 texture -> PNG converter for Ace Combat 8 (works on retoc 'to-legacy' output).
 
 A cooked Texture2D is split over three files:
     .uasset   package header; ends with the data-resource table (where every mip's bytes live)

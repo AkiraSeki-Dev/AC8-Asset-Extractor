@@ -1,4 +1,4 @@
-"""ACE Combat 8 Asset Extractor - browse the game's assets and extract them in one click.
+"""Ace Combat 8 Asset Extractor - browse the game's assets and extract them in one click.
 
     1. Scan the game once (or import an existing listing) -> asset browser by category / group / type, and the
        Catalog (aircraft, characters, bosses … by name)
@@ -43,8 +43,8 @@ import tkinter.font as tkfont
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # sibling ac8_* modules
 import ac8_catalog as catalog  # noqa: E402  (pure python, no extra packages)
 
-APP_NAME = "ACE Combat 8 Asset Extractor"
-APP_VERSION = "1.2.4"
+APP_NAME = "Ace Combat 8 Asset Extractor"
+APP_VERSION = "1.2.5"
 KOFI_URL = "https://ko-fi.com/akiraseki"
 CODE = Path(__file__).resolve().parent         # app/: the scripts and their fonts, icons and web viewer
 HERE = CODE.parent                             # the app folder (the exe, app/, AC8 Unpacker/, data/, logs/)
@@ -1114,7 +1114,7 @@ class App(tk.Tk):
             tk.Label(bar, image=self._logo, bg=C["bg1"]).pack(side="left")
         brand = tk.Frame(bar, bg=C["bg1"])
         brand.pack(side="left", padx=(10, 20))
-        tk.Label(brand, text="ACE COMBAT 8", bg=C["bg1"], fg=C["text1"], font=F["title"]).pack(anchor="w")
+        tk.Label(brand, text="Ace Combat 8", bg=C["bg1"], fg=C["text1"], font=F["title"]).pack(anchor="w")
         tk.Label(brand, text=f"ASSET EXTRACTOR  v{APP_VERSION}", bg=C["bg1"], fg=C["accent"], font=F["tiny"]).pack(anchor="w")
 
         self.search_in = Input(bar, self.v_search, icon="⌕", font=F["input"],
@@ -1903,7 +1903,7 @@ class App(tk.Tk):
             self.v_game.set(found)
             self._log(f"Game found: {found}", "ok")
         else:
-            messagebox.showwarning(APP_NAME, "Could not find ACE COMBAT 8 through Steam. Use Browse… instead.")
+            messagebox.showwarning(APP_NAME, "Could not find Ace Combat 8 through Steam. Use Browse… instead.")
 
     def _browse_out(self):
         d = filedialog.askdirectory(title="Where should extraction folders be created?")
@@ -2496,7 +2496,7 @@ class App(tk.Tk):
             return False
 
     def _steam_appid(self, root):
-        """ACE COMBAT 8's Steam app id, from the Steam library the game is installed in (appmanifest_*.acf)."""
+        """Ace Combat 8's Steam app id, from the Steam library the game is installed in (appmanifest_*.acf)."""
         try:
             ids = root / "steam_appid.txt"
             if ids.exists() and ids.read_text().strip().isdigit():
@@ -2514,12 +2514,12 @@ class App(tk.Tk):
         """(game folder, Steam app id) or None after telling the user what's missing."""
         root = self._game_root()
         if root is None or not (root / "start_protected_game.exe").exists():
-            messagebox.showerror(APP_NAME, "Set the Game folder in Settings first (the ACE COMBAT 8 folder that holds "
+            messagebox.showerror(APP_NAME, "Set the Game folder in Settings first (the Ace Combat 8 folder that holds "
                                            "start_protected_game.exe).")
             return None
         appid = self._steam_appid(root)
         if not appid:
-            messagebox.showerror(APP_NAME, "Couldn't find ACE COMBAT 8 in your Steam library (no appmanifest for "
+            messagebox.showerror(APP_NAME, "Couldn't find Ace Combat 8 in your Steam library (no appmanifest for "
                                            f"“{root.name}”).")
             return None
         import ac8_steam

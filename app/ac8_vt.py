@@ -1,4 +1,4 @@
-"""Virtual texture (VT / UDIM) reader for cooked UE5.4 textures in ACE COMBAT 8.
+"""Virtual texture (VT / UDIM) reader for cooked UE5.4 textures in Ace Combat 8.
 
 Layout after the pixel-format string of FTexturePlatformData when bIsVirtual is set (FVirtualTextureBuiltData):
   NumLayers, ?, WidthInBlocks, HeightInBlocks, TileSize, TileBorderSize, TileDataOffsetPerLayer[],

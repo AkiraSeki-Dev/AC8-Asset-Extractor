@@ -1,4 +1,4 @@
-"""Cooked UE5.4 mesh reader for ACE COMBAT 8 (retoc 'to-legacy' output).
+"""Cooked UE5.4 mesh reader for Ace Combat 8 (retoc 'to-legacy' output).
 
 Reads the highest-detail LOD of StaticMesh and SkeletalMesh packages: positions, normals, tangents, UVs, vertex
 colours, triangles, material sections, and for skeletal meshes the bone hierarchy and skin weights.

@@ -1,4 +1,4 @@
-"""Turn ACE COMBAT 8's packed textures into standard PBR maps (+ AO) for Blender, Substance, Unreal, Unity or glTF.
+"""Turn Ace Combat 8's packed textures into standard PBR maps (+ AO) for Blender, Substance, Unreal, Unity or glTF.
 
 Works on the PNGs the app exports (2_Final_Export/Textures). Textures are grouped into sets by name:
 T_PP0023_f14d_001_C + _MRX + _NO -> set "T_PP0023_f14d_001"; UDIM tiles (.1001, .1002 …) are kept apart.
