@@ -8,9 +8,11 @@ A cooked Texture2D is split over three files:
 
     python ac8_textures.py <raw folder> <output folder> [--max-texture 2048]
 """
+import contextlib
 import os
 import struct
 import sys
+import threading
 from pathlib import Path
 
 from PIL import Image
@@ -182,17 +184,38 @@ def convert_texture(uasset_path: Path, out_png: Path, max_size=0):
             mip = 0
             while max_size and (tile_px >> mip) > max_size and mip < v.num_mips - 1:
                 mip += 1
-            img = v.decode_mip(mip)
-            out_png.parent.mkdir(parents=True, exist_ok=True)
-            if v.blocks_w * v.blocks_h == 1:
-                img.save(out_png)
-                return fmt, img.size, 1
-            tw, th = img.width // v.blocks_w, img.height // v.blocks_h
-            for y in range(v.blocks_h):
-                for x in range(v.blocks_w):
-                    tile = img.crop((x * tw, y * th, (x + 1) * tw, (y + 1) * th))
-                    tile.save(out_png.with_name(f"{out_png.stem}.{1001 + x + 10 * y}.png"))
-            return fmt, (tw, th), v.blocks_w * v.blocks_h
+            # a huge virtual texture (many big UDIM tiles) takes a lot of memory: only two of those at a time
+            big = (v.width >> mip) * (v.height >> mip) > 64_000_000
+            with _BIG_TEXTURES if big else contextlib.nullcontext():
+                return _write_vt(v, mip, fmt, out_png)
+    return _write_plain(uasset_path, out_png, max_size)
+
+
+_BIG_TEXTURES = threading.BoundedSemaphore(2)
+
+
+def _write_vt(v, mip, fmt, out_png):
+    """Decode a virtual texture at that mip and write it: one PNG, or one per UDIM tile (name.1001.png …)."""
+    img = v.decode_mip(mip)
+    out_png.parent.mkdir(parents=True, exist_ok=True)
+    if v.blocks_w * v.blocks_h == 1:
+        img.save(out_png)
+        return fmt, img.size, 1
+    tw, th = img.width // v.blocks_w, img.height // v.blocks_h
+
+    def save_tile(xy):
+        x, y = xy
+        tile = img.crop((x * tw, y * th, (x + 1) * tw, (y + 1) * th))
+        tile.save(out_png.with_name(f"{out_png.stem}.{1001 + x + 10 * y}.png"))
+
+    # PNG writing is most of the time and Pillow does it outside Python's lock: tiles in parallel
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=min(4, v.blocks_w * v.blocks_h)) as ex:
+        list(ex.map(save_tile, [(x, y) for y in range(v.blocks_h) for x in range(v.blocks_w)]))
+    return fmt, (tw, th), v.blocks_w * v.blocks_h
+
+
+def _write_plain(uasset_path, out_png, max_size):
     tex = parse_texture(uasset_path)
     mips = tex["mips"]
     if max_size:
@@ -208,34 +231,50 @@ def convert_texture(uasset_path: Path, out_png: Path, max_size=0):
     raise TextureError("no mip data available")
 
 
-def convert_folder(raw_dir, out_dir, log=print, max_size=0):
+JOBS = max(1, min(os.cpu_count() or 2, 8))  # textures converted at once (decoding and PNG writing run in parallel)
+
+
+def convert_folder(raw_dir, out_dir, log=print, max_size=0, jobs=JOBS):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
     raw_dir, out_dir = Path(raw_dir), Path(out_dir)
     files = [Path(r) / f for r, _d, fs in os.walk(raw_dir) for f in fs if f.lower().endswith(".uasset")]
-    textures = [f for f in files if is_texture_package(f)]
-    log(f"Textures: {len(textures)} of {len(files)} packages")
-    ok = fail = 0
+    textures = sorted(f for f in files if is_texture_package(f))
+    log(f"Textures: {len(textures)} of {len(files)} packages ({jobs} at a time)")
+    lock = threading.Lock()
+    state = {"ok": 0, "fail": 0, "done": 0}
     unsupported = {}
-    for i, f in enumerate(sorted(textures), 1):
+
+    def one(f):
         rel = f.relative_to(raw_dir).with_suffix(".png")
         # drop the Live/Content prefix so the PNGs mirror the game folders
         parts = rel.parts
         if len(parts) > 2 and parts[1] == "Content":
             rel = Path(*parts[2:])
+        res, msg = 0, None
         try:
-            fmt, size, ntiles = convert_texture(f, out_dir / rel, max_size)
-            ok += ntiles
+            res = convert_texture(f, out_dir / rel, max_size)[2]
         except TextureError as e:
-            fail += 1
             msg = str(e)
-            if msg.startswith("pixel format"):
-                unsupported[msg] = unsupported.get(msg, 0) + 1
-            else:
-                log(f"  {f.name}: {msg}")
         except Exception as e:  # keep going on anything unexpected
-            fail += 1
-            log(f"  {f.name}: ERROR {e}")
-        if i % 25 == 0 or i == len(textures):
-            print(f"\rTextures {i}/{len(textures)}", end="", file=sys.stderr, flush=True)
+            msg = f"ERROR {e}"
+        with lock:
+            state["done"] += 1
+            if msg is None:
+                state["ok"] += res
+            else:
+                state["fail"] += 1
+                if msg.startswith("pixel format"):
+                    unsupported[msg] = unsupported.get(msg, 0) + 1
+                else:
+                    log(f"  {f.name}: {msg}")
+            i = state["done"]
+            if i % 10 == 0 or i == len(textures):
+                print(f"\rTextures {i}/{len(textures)}", end="", file=sys.stderr, flush=True)
+
+    with ThreadPoolExecutor(max_workers=jobs) as ex:
+        list(ex.map(one, textures))
+    ok, fail = state["ok"], state["fail"]
     print(file=sys.stderr)
     for msg, n in unsupported.items():
         log(f"  {n} texture(s): {msg}")

@@ -182,25 +182,40 @@ def write_set(maps, out_dir, name, preset, normal_conv=None, tile=None):
     return written
 
 
-def convert_folder(src, out, preset="separate", normal_conv=None, only=None, log=print):
+JOBS = max(1, min(os.cpu_count() or 2, 8))
+
+
+def convert_folder(src, out, preset="separate", normal_conv=None, only=None, log=print, jobs=JOBS):
     """Convert every texture set found in `src`. `only` = optional set of set names to limit to."""
     src, out = Path(src), Path(out)
     sets = find_sets(src)
     if only:
         sets = {k: v for k, v in sets.items() if k[0] in only}
-    log(f"PBR: {len(sets)} texture set(s) -> {PRESETS[preset][0]}")
-    n = 0
-    for i, ((name, tile, sub), roles) in enumerate(sorted(sets.items(), key=lambda kv: kv[0][:2]), 1):
+    log(f"PBR: {len(sets)} texture set(s) -> {PRESETS[preset][0]} ({jobs} at a time)")
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    lock = threading.Lock()
+    state = {"n": 0, "done": 0}
+
+    def one(item):
+        (name, tile, sub), roles = item
         label = name + (f".{tile}" if tile else "")
-        print(f"\rPBR {i}/{len(sets)}  {label}", end="", file=sys.stderr, flush=True)
         try:
             maps = unpack_set(roles)
             files = write_set(maps, out / sub, name, preset, normal_conv, tile)
-            n += len(files)
-            have = "+".join(sorted(roles))
-            log(f"  {label}: {have} -> {len(files)} maps")
+            msg, k = f"  {label}: {'+'.join(sorted(roles))} -> {len(files)} maps", len(files)
         except Exception as e:
-            log(f"  {label}: ERROR {e}")
+            msg, k = f"  {label}: ERROR {e}", 0
+        with lock:
+            state["n"] += k
+            state["done"] += 1
+            log(msg)
+            print(f"\rPBR {state['done']}/{len(sets)}", end="", file=sys.stderr, flush=True)
+
+    # numpy and PNG writing run outside Python's lock, so sets convert in parallel
+    with ThreadPoolExecutor(max_workers=jobs) as ex:
+        list(ex.map(one, sorted(sets.items(), key=lambda kv: kv[0][:2])))
+    n = state["n"]
     print(file=sys.stderr)
     log(f"PBR done: {n} maps written to {out}")
     return n

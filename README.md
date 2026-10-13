@@ -112,6 +112,8 @@ AC8 Asset Extractor\
 - If something fails, the log at the bottom says why, and the rest of the extraction carries on. Send the file
   from the **Logs folder** when reporting a problem.
 - 3D previews are cleared when the app closes (Settings → 3D previews to keep them).
+- Converting uses up to 8 CPU cores. For faster extractions (and smaller files), set **Max texture size** to 2048 px
+  in Settings; full size is about three times slower for aircraft textures.
 
 ## Version history
 

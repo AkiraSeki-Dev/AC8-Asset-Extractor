@@ -12,6 +12,7 @@ import re
 import os
 import struct
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -96,6 +97,14 @@ class TextureLibrary:
                 if f.endswith(".uasset"):
                     self.by_name.setdefault(f[:-7].lower(), Path(r) / f)
         self.cache = {}
+        self.encoded = {}  # (texture, tile, kind, ao) -> (bytes, mime, has alpha): shared by every GLB
+        self._lock = threading.Lock()
+        self._key_locks = {}
+
+    def key_lock(self, key):
+        """One lock per texture, so parallel meshes decode / encode a shared texture only once."""
+        with self._lock:
+            return self._key_locks.setdefault(key, threading.Lock())
 
     def find(self, path_parts):
         """Import path (['/Game/A/B/T_X', 'T_X']) -> .uasset in the raw folder, if it was extracted."""
@@ -114,6 +123,12 @@ class TextureLibrary:
         key = str(uasset)
         if key in self.cache:
             return self.cache[key]
+        with self.key_lock(("load", key)):
+            if key not in self.cache:
+                self.cache[key] = self._load(uasset)
+        return self.cache[key]
+
+    def _load(self, uasset):
         result = None
         try:
             pkg = Package(uasset)
@@ -132,11 +147,7 @@ class TextureLibrary:
                 tiles = {}
                 for y in range(v.blocks_h):
                     for x in range(v.blocks_w):
-                        tile = img.crop((x * tw, y * th, (x + 1) * tw, (y + 1) * th))
-                        if tile.getextrema()[0][0] != tile.getextrema()[0][1] or v.blocks_w * v.blocks_h == 1:
-                            tiles[(x, y)] = tile
-                        else:
-                            tiles[(x, y)] = tile  # flat tile: still valid (fallback colour)
+                        tiles[(x, y)] = img.crop((x * tw, y * th, (x + 1) * tw, (y + 1) * th))
                 result = {"udim": (v.blocks_w, v.blocks_h) if v.blocks_w * v.blocks_h > 1 else None,
                           "tiles": tiles}
             else:
@@ -151,7 +162,6 @@ class TextureLibrary:
                         break
         except Exception as e:
             self.log(f"  texture {Path(uasset).name}: {e}")
-        self.cache[key] = result
         return result
 
 
@@ -363,14 +373,27 @@ class MaterialBuilder:
         key = (str(uasset), tile, kind, str(ao_src[0]) if ao_src else None)
         if key in self.images:
             return self.images[key]
+        enc = self.lib.encoded.get(key)
+        if enc is None:
+            with self.lib.key_lock(("enc",) + key):  # another mesh may be making the same image right now
+                enc = self.lib.encoded.get(key)
+                if enc is None:
+                    enc = self.lib.encoded[key] = self._encode(uasset, tile, kind, ao_src)
+        if enc is False:
+            self.images[key] = (None, False)
+            return self.images[key]
+        data, mime, alpha = enc
+        name = Path(uasset).stem + (f".{1001 + tile[0] + tile[1] * 10}" if tile != (0, 0) else "")
+        idx = self.glb.image(data, mime, name)
+        self.images[key] = (idx, alpha)
+        return self.images[key]
+
+    def _encode(self, uasset, tile, kind, ao_src):
+        """-> (bytes, mime, has alpha), or False when the texture can't be read."""
         t = self.lib.load(uasset)
-        if not t:
-            self.images[key] = (None, False)
-            return self.images[key]
-        img = t["tiles"].get(tile) or t["tiles"].get((0, 0))
+        img = (t["tiles"].get(tile) or t["tiles"].get((0, 0))) if t else None
         if img is None:
-            self.images[key] = (None, False)
-            return self.images[key]
+            return False
         if kind == "normal":
             img = prep_normal(img)
         elif kind in ("mr", "orm"):
@@ -379,11 +402,7 @@ class MaterialBuilder:
                 src_img = self.tile_image(ao_src[0], tile)
                 ao = ao_from(src_img, ao_src[1]) if src_img is not None else None
             img = prep_mr(img, kind, ao)
-        data, mime, alpha = encode(img, "base" if kind == "base" else ("normal" if kind == "normal" else "mr"))
-        name = Path(uasset).stem + (f".{1001 + tile[0] + tile[1] * 10}" if tile != (0, 0) else "")
-        idx = self.glb.image(data, mime, name)
-        self.images[key] = (idx, alpha)
-        return self.images[key]
+        return encode(img, "base" if kind == "base" else ("normal" if kind == "normal" else "mr"))
 
     def udim_of(self, slot_textures):
         for role in ("base", "normal", "mr", "orm"):
@@ -548,15 +567,20 @@ def build_glb(mesh, lib, out_path, log=print):
     return len(prims), len(glb.j.get("images", []))
 
 
-def convert_folder(raw_dir, out_dir, max_texture=2048, log=print):
+JOBS = max(1, min(os.cpu_count() or 2, 8))  # meshes converted at once (they share one texture cache)
+
+
+def convert_folder(raw_dir, out_dir, max_texture=2048, log=print, jobs=JOBS):
+    from concurrent.futures import ThreadPoolExecutor
     raw_dir, out_dir = Path(raw_dir), Path(out_dir)
     files = sorted(Path(r) / f for r, _d, fs in os.walk(raw_dir) for f in fs if f.endswith(".uasset"))
     meshes = [f for f in files if am.is_mesh_package(f)]
-    log(f"Meshes: {len(meshes)} found")
+    log(f"Meshes: {len(meshes)} found ({jobs} at a time)")
     lib = TextureLibrary(raw_dir, max_texture, log)
-    ok = fail = 0
-    for i, f in enumerate(meshes, 1):
-        print(f"\rMeshes {i}/{len(meshes)}  {f.stem}", end="", file=sys.stderr, flush=True)
+    lock = threading.Lock()
+    state = {"ok": 0, "fail": 0, "done": 0}
+
+    def one(f):
         rel = f.relative_to(raw_dir).with_suffix(".glb")
         parts = rel.parts
         if len(parts) > 2 and parts[1] == "Content":
@@ -567,13 +591,20 @@ def convert_folder(raw_dir, out_dir, max_texture=2048, log=print):
             t0 = time.time()
             mesh = am.read_mesh(f)
             nprim, nimg = build_glb(mesh, lib, out, log)
-            ok += 1
             kind = f"{len(mesh.bones)} bones" if mesh.bones else "static"
-            log(f"  {f.stem}: {len(mesh.positions):,} verts, {len(mesh.indices) // 3:,} tris, {kind}, "
-                f"{nprim} parts, {nimg} textures ({time.time() - t0:.1f}s)")
+            msg, good = (f"  {f.stem}: {len(mesh.positions):,} verts, {len(mesh.indices) // 3:,} tris, {kind}, "
+                         f"{nprim} parts, {nimg} textures ({time.time() - t0:.1f}s)"), True
         except Exception as e:
-            fail += 1
-            log(f"  {f.stem}: ERROR {e}")
+            msg, good = f"  {f.stem}: ERROR {e}", False
+        with lock:
+            state["ok" if good else "fail"] += 1
+            state["done"] += 1
+            log(msg)
+            print(f"\rMeshes {state['done']}/{len(meshes)}", end="", file=sys.stderr, flush=True)
+
+    with ThreadPoolExecutor(max_workers=jobs) as ex:
+        list(ex.map(one, meshes))
+    ok, fail = state["ok"], state["fail"]
     print(file=sys.stderr)
     log(f"Meshes done: {ok} GLB written, {fail} failed")
     return ok, fail
