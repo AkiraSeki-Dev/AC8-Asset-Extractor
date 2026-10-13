@@ -962,10 +962,10 @@ class App(tk.Tk):
         brand = tk.Frame(bar, bg=C["bg1"])
         brand.pack(side="left", padx=(10, 20))
         tk.Label(brand, text="ACE COMBAT 8", bg=C["bg1"], fg=C["text1"], font=F["title"]).pack(anchor="w")
-        tk.Label(brand, text="ASSET EXTRACTOR", bg=C["bg1"], fg=C["accent"], font=F["tiny"]).pack(anchor="w")
+        tk.Label(brand, text=f"ASSET EXTRACTOR  v{APP_VERSION}", bg=C["bg1"], fg=C["accent"], font=F["tiny"]).pack(anchor="w")
 
         self.search_in = Input(bar, self.v_search, icon="⌕", font=F["input"],
-                               placeholder="Search assets…   f14d · SM_FCY · Cockpit")
+                               placeholder="Search assets…")
         self.search_in.pack(side="left", fill="x", expand=True)
         self.dd_cat = Dropdown(bar, "Category", self.v_cat, width=14, command=self._on_category)
         self.dd_cat.pack(side="left", padx=(10, 0))

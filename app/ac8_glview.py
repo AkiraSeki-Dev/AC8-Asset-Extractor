@@ -1942,7 +1942,7 @@ class _ViewMixin:
         return self.r.opts if self.r else {}
 
     def change_fly_speed(self, steps):
-        self.fly_speed = float(min(max(self.fly_speed * (1.25 ** steps), 0.05), 40.0))
+        self.fly_speed = float(min(max(self.fly_speed * (1.25 ** steps), 0.01), 40.0))
         return self.fly_speed
 
     def change_fov(self, steps):
