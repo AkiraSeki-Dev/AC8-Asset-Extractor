@@ -120,6 +120,11 @@ AC8 Asset Extractor\
 
 ## Version history
 
+v1.2.4: fixes for more than one monitor.
+- Dropdown lists (e.g. the livery list) open under their box on the monitor the app is on, instead of jumping to
+  the main monitor.
+- The full-size texture window opens in the middle of the app's monitor.
+
 v1.2.3: font extraction.
 - The game's fonts now come out as their original `.ttf` / `.otf` files, in `2_Final_Export\Fonts`.
 - New **Fonts** group in the catalog: game fonts, menu fonts and Unreal Engine fonts.
