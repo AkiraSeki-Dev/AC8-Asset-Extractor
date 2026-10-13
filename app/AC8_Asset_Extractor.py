@@ -159,6 +159,7 @@ MESH_CONVERTER = CODE / "ac8_gltf.py"         # cooked static/skeletal mesh -> G
 FBX_CONVERTER = CODE / "ac8_fbx.py"           # GLB -> FBX, built in (no Blender needed)
 LIVERY_SCRIPT = CODE / "ac8_livery.py"         # aircraft liveries -> 2_Final_Export/Liveries/<aircraft>.json
 PBR_SCRIPT = CODE / "ac8_pbr.py"               # packed textures -> PBR maps + AO
+FONT_SCRIPT = CODE / "ac8_fonts.py"            # FontFace assets -> the original .ttf / .otf files
 PREVIEW_DIR_NAME = "_Previews"
 MESH_FORMAT = "5"  # bump when the GLB output changes, so cached previews are rebuilt (5 = 2nd UV set for decals)
 PBR_PRESETS = [("off", "Off"), ("separate", "Separate maps (Blender / Substance)"), ("unreal", "Unreal (ORM)"),
@@ -2237,6 +2238,22 @@ class App(tk.Tk):
                                                                 else "not found (names will use the game's own keys)"))
         return got
 
+    def _step_font_files(self, key, raw):
+        """A FontFace can keep its font file next to the package as <name>.ufont, packed in the game's .pak
+        files instead of the containers retoc reads: fetch those for the fonts that need them."""
+        try:
+            import ac8_fonts
+            fonts = [f for f in raw.rglob("*.uasset") if ac8_fonts.is_font_face(f)]
+            need = sorted({f.parent.relative_to(raw).as_posix() for f in fonts if not ac8_fonts.font_from_package(f)})
+        except Exception as e:
+            self.post("log", f"  Fonts: couldn't check ({e})")
+            return
+        if need and UNPACKER_DIR:
+            self.post("step", f"Unpacking the font files of {len(need)} font folder(s)…")
+            for folder in need:
+                self.run_cmd(self._unpacker_base() + ["--key", key, "extract-pak", folder, str(raw)], UNPACKER_DIR,
+                             log_lines=False)
+
     def _step_convert(self, raw, final, fbx=False):
         """Textures -> PNG, meshes -> GLB, and optionally GLB -> FBX (built in). Returns (glb, png, fbx)."""
         size = self.v_max_tex.get() or "0"
@@ -2258,14 +2275,20 @@ class App(tk.Tk):
         meshes = count_files(mesh_out, ".glb")
         if meshes:
             self.post("log", f"✔ Meshes: {fmt(meshes)} GLB in {mesh_out}")
+        if any(raw.rglob("*.uasset")):
+            fdir = final / "Fonts"
+            self.run_cmd([console_python(), "-u", FONT_SCRIPT, raw, fdir], HERE)
+            nf = count_files(fdir, ".ttf", ".otf", ".ttc") if fdir.exists() else 0
+            if nf:
+                self.post("log", f"✔ Fonts: {fmt(nf)} font file(s) in {fdir}")
         if textures and self.v_pbr_auto.get() not in ("", "off"):
             self._step_pbr(tex_out, final / "PBR", self.v_pbr_auto.get(), self.v_pbr_normal.get())
         fbx_count = 0
         if fbx and meshes:
             fbx_count = self._step_fbx(mesh_out, final / "FBX")
-        if textures == 0 and meshes == 0:
-            self.post("log", "  Note: nothing to convert here. Textures become PNG and meshes become GLB; materials,\n"
-                             "  animations, audio… stay as raw files in 1_Raw_UAssets.")
+        if textures == 0 and meshes == 0 and not count_files(final / "Fonts", ".ttf", ".otf", ".ttc"):
+            self.post("log", "  Note: nothing to convert here. Textures become PNG, meshes GLB and fonts TTF/OTF;\n"
+                             "  materials, animations, audio… stay as raw files in 1_Raw_UAssets.")
         return meshes, textures, fbx_count
 
     def _step_pbr(self, tex_dir, out_dir, preset, normal="auto", only=None):
@@ -2336,15 +2359,17 @@ class App(tk.Tk):
             n = self._step_unpack(key, filters, raw, paks)
             self._step_shared(key, raw, paks)
             self._step_emblems(key, raw, paks)
+            self._step_font_files(key, raw)
             meshes = textures = nfbx = 0
             if convert:
                 meshes, textures, nfbx = self._step_convert(raw, final, fbx)
             self._write_info(folder, ticked, TYPE_LABEL[t], n, meshes, textures, started, nfbx)
-            if convert and not keep_raw and (textures or meshes):
+            nfont = count_files(final / "Fonts", ".ttf", ".otf", ".ttc") if convert else 0
+            if convert and not keep_raw and (textures or meshes or nfont):
                 shutil.rmtree(raw, ignore_errors=True)
                 self.post("log", "Raw UAssets deleted (Keep Raw is off).")
             tail = (f" — {fmt(n)} raw, {fmt(textures)} PNG, {fmt(meshes)} GLB" + (f", {fmt(nfbx)} FBX" if nfbx else "")
-                    if convert else f" — {fmt(n)} raw assets")
+                    + (f", {fmt(nfont)} fonts" if nfont else "") if convert else f" — {fmt(n)} raw assets")
             reopen, self._view_reopen = getattr(self, "_view_reopen", None), None
             if reopen and meshes:  # started from the viewer's Extract button: show the jet again, liveries and all
                 self.post("call", lambda: self.open_viewer([final / "Meshes"], reopen))
@@ -2367,6 +2392,7 @@ class App(tk.Tk):
             if key and paks and raw.exists():
                 self._step_shared(key, raw, paks)
                 self._step_emblems(key, raw, paks)
+                self._step_font_files(key, raw)
             meshes, textures, nfbx = self._step_convert(raw, final, fbx)
             self._info_items = None
             self._write_info(folder, None, None, count_files(raw, ".uasset", ".umap"), meshes, textures, started,
@@ -2880,13 +2906,14 @@ class App(tk.Tk):
             if not items:
                 continue
             nm = sum(len(it["meshes"]) for _k, it in items)
-            g = t.insert("", "end", iid=f"g:c:{gname}", text=f"  {gname}  ({len(items)} · {fmt(nm)} meshes)",
-                         open=bool(q) and len(items) < 60, tags=("group",))
+            fonts = gname == "Fonts"
+            g = t.insert("", "end", iid=f"g:c:{gname}", tags=("group",), open=bool(q) and len(items) < 60,
+                         text=f"  {gname}  ({len(items)}" + (")" if fonts else f" · {fmt(nm)} meshes)"))
             for k, it in sorted(items, key=lambda kv: kv[1].get("sort") or kv[1]["title"].lower()):
                 badge = "   • NEW" if self._new_in(it["keys"]) else ""
-                t.insert(g, "end", iid=f"c:{gname}|{k}",
-                         text=f"  {it['title']}   ·  {len(it['meshes'])} mesh{'es' if len(it['meshes']) != 1 else ''}"
-                              + badge)
+                what = f"{len(it['keys'])} files" if fonts else \
+                    f"{len(it['meshes'])} mesh{'es' if len(it['meshes']) != 1 else ''}"
+                t.insert(g, "end", iid=f"c:{gname}|{k}", text=f"  {it['title']}   ·  {what}" + badge)
                 n_items += 1
         self._fill_new_group(match)
         if not q:
@@ -3163,9 +3190,17 @@ class App(tk.Tk):
         self._cat_header(f"{it['title']}", f"{gname}   ·   {ikey}   ·   {it['count']} files", btns)
         tk.Label(self.cat_detail, text=summary, bg=C["bg1"], fg=C["text3"], font=F["small"], anchor="w",
                  padx=16).pack(fill="x")
+        if gname == "Fonts":
+            f = self._cat_section(f"Fonts and font sets  ({len(it['keys'])})",
+                                  "Extract to get each one as its .ttf / .otf file.\n"
+                                  "UI_FontSet_… only point at the other fonts.")
+            for k in sorted(it["keys"], key=lambda k_: k_.rsplit("/", 1)[-1].lower()):
+                self._cat_row(f, k.rsplit("/", 1)[-1].rsplit(".", 1)[0] + ("   • NEW" if k in new else ""), k, mesh=False)
+            tk.Frame(self.cat_detail, bg=C["bg1"], height=16).pack()
+            return
         if not meshes:
             self._cat_section("No 3D models here", "This folder has no meshes — Select or Extract it to get its "
-                                                    "files (textures come out as PNG).")
+                                                    "files (textures come out as PNG, fonts as TTF / OTF).")
         by = {}
         # characters (incl. the online ones): by what the mesh is (outfits, faces, hair …), not by folder
         parts = gname == "Characters" or ikey.startswith("Character/")

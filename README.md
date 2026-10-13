@@ -40,8 +40,10 @@ Open **Settings** (top right). A red **Setup needed** bar on the main screen tel
 
 - **Assets tab:** find files with the **Category / Group / Type** dropdowns or the search bar, select them, and press
   **▶ Extract Selected**.
-- **Catalog tab:** the same files sorted into aircraft, weapons, characters, vehicles, environments and so on. Pick
-  an entry and use **Extract now**, or **Preview** a part in 3D first.
+- **Catalog tab:** the same files sorted into aircraft, weapons, characters, vehicles, environments, fonts and so on.
+  Pick an entry and use **Extract now**, or **Preview** a part in 3D first.
+- **Fonts:** the game's fonts come out as the original `.ttf` / `.otf` files (Catalog → **Fonts**, or select a
+  `Font` folder), in `2_Final_Export\Fonts`.
 - **Select the whole aircraft folder** so its meshes, materials and textures come out together. That's how textures
   get linked to each part.
 - Options next to the Extract button: **Export PNG+GLB** (convert the files), **Export FBX**, **Keep Raw** (keep the
@@ -94,7 +96,7 @@ AC8 Asset Extractor\
     F18C_2026-10-12_1600\
       1_Raw_UAssets\           the unpacked game files (only with Keep Raw)
       2_Final_Export\
-        Textures\  Meshes\  FBX\  PBR_<preset>\  Textures_Export\  Liveries\
+        Textures\  Meshes\  FBX\  Fonts\  PBR_<preset>\  Textures_Export\  Liveries\
       extraction_info.txt     what was selected, when, and counts
       extraction_log.txt      the full log
 ```

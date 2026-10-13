@@ -133,6 +133,7 @@ COLLECTIONS = [
     ("Gadgets", ["Gadgets"], 1),
     ("Environments", ["Environments", "OnlineMode/Environment"], 2),
     ("Effects (VFX)", ["VFX", "OnlineMode/VFX"], 1),
+    ("Fonts", ["UI/Font", "NUI/Font", "OnlineMode/UI/Font", "[Engine Content]/EngineFonts"], 0),
     ("User interface", ["UI", "NUI", "OnlineMode/UI"], 1),
     ("Emblems", ["Emblem"], 1),
 ]
@@ -312,6 +313,9 @@ def _add_collection(collections, key, parts):
             order_ = MAIN_ROSTER if code in MAIN_ROSTER else ROSTER_ORDER
             main = code in order_
             sort = f"{rank:02d} " + (f"0 {order_.index(code)}" if main else f"1 {title.lower()}")
+        elif group == "Fonts":
+            title = {"UI/Font": "Game fonts (UI/Font)", "NUI/Font": "Menu fonts (NUI/Font)",
+                     "[Engine Content]/EngineFonts": "Unreal Engine fonts"}.get(ikey, ikey)
         elif group == "Online avatars":
             title = "Avatar · " + " / ".join(parts[plen:n])
             sort = "0 " + title.lower()   # avatar parts first, then the online characters
@@ -328,7 +332,7 @@ def _add_collection(collections, key, parts):
 
 
 GROUP_ORDER = ["Ground vehicles", "Ships", "Bosses (online)", "Characters", "Online avatars", "Gadgets", "Environments",
-               "Effects (VFX)", "User interface", "Emblems", OTHER]
+               "Effects (VFX)", "User interface", "Fonts", "Emblems", OTHER]
 
 
 WEAPON_TOKEN = re.compile(r"\bw_([a-z0-9]+)_[a-z]\d\b", re.I)
