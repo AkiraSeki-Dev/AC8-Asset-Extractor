@@ -1114,7 +1114,7 @@ class App(tk.Tk):
             tk.Label(bar, image=self._logo, bg=C["bg1"]).pack(side="left")
         brand = tk.Frame(bar, bg=C["bg1"])
         brand.pack(side="left", padx=(10, 20))
-        tk.Label(brand, text="Ace Combat 8", bg=C["bg1"], fg=C["text1"], font=F["title"]).pack(anchor="w")
+        tk.Label(brand, text="ACE COMBAT 8", bg=C["bg1"], fg=C["text1"], font=F["title"]).pack(anchor="w")
         tk.Label(brand, text=f"ASSET EXTRACTOR  v{APP_VERSION}", bg=C["bg1"], fg=C["accent"], font=F["tiny"]).pack(anchor="w")
 
         self.search_in = Input(bar, self.v_search, icon="⌕", font=F["input"],
