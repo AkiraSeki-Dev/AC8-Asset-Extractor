@@ -1602,15 +1602,18 @@ class NavGizmo(tk.Canvas):
 
     AXES = (("X", (1.0, 0.0, 0.0), "#ff3352"), ("Y", (0.0, 0.0, -1.0), "#8bdc00"), ("Z", (0.0, 1.0, 0.0), "#2890ff"))
 
-    def __init__(self, view, size=96, font_file=None):
-        tk.Canvas.__init__(self, view.master, width=size, height=size, highlightthickness=0, bd=0,
+    def __init__(self, view, size=96, font_file=None, on_frame=None, on_hint=None):
+        # under the circle: a round "frame the model" button
+        self.btn, self.gap = round(size * 0.36), round(size * 0.1)
+        self.height = size + (self.gap + self.btn if on_frame else 0)
+        tk.Canvas.__init__(self, view.master, width=size, height=self.height, highlightthickness=0, bd=0,
                            bg=self._bg(view), cursor="hand2")
         self.view, self.size = view, size
-        self.font_file = font_file
+        self.font_file, self.on_frame, self.on_hint = font_file, on_frame, on_hint
         self._job, self._hover, self._press, self._balls = None, None, None, []
         view.gizmo = self
         self.bind("<Motion>", self._motion)
-        self.bind("<Leave>", lambda e: self._set_hover(None))
+        self.bind("<Leave>", lambda e: (self._set_hover(None), self.on_hint and self.on_hint(None)))
         self.bind("<ButtonPress-1>", self._down)
         self.bind("<B1-Motion>", self._drag)
         self.bind("<ButtonRelease-1>", self._up)
@@ -1667,15 +1670,27 @@ class NavGizmo(tk.Canvas):
         self.configure(bg=bg)
         s, k = self.size, self.SS
         c, R, br = s / 2, s / 2 - s * 0.13, s * 0.105
-        img = Image.new("RGB", (s * k, s * k), bg)
+        img = Image.new("RGB", (s * k, self.height * k), bg)
         dr = ImageDraw.Draw(img)
 
         def oval(x, y, r, fill=None, outline=None, width=0):
             dr.ellipse((x * k - r * k, y * k - r * k, x * k + r * k, y * k + r * k), fill=fill, outline=outline,
                        width=round(width * k))
 
-        if self._hover is not None or self._press is not None:
+        if (self._hover is not None and self._hover[0] != "frame") or self._press is not None:
             oval(c, c, s / 2 - 0.5, fill="#c8c8cc" if light else "#3a3a40")
+        if self.on_frame:  # frame button: corner brackets around a dot
+            hot = self._hover is not None and self._hover[0] == "frame"
+            fy, b = s + self.gap + self.btn / 2, self.btn
+            oval(c, fy, b / 2 - 0.5, fill=("#b4b4ba" if hot else "#d4d4d8") if light else ("#4a4a52" if hot else "#2c2c32"))
+            ink = "#202024" if light else "#e8e8ec"
+            h, L, lw = b * 0.24, b * 0.11, max(1.4, b / 18) * k
+            for sx in (-1, 1):
+                for sy in (-1, 1):
+                    x0, y0 = (c + sx * h) * k, (fy + sy * h) * k
+                    dr.line((x0, y0, x0 - sx * L * k, y0), fill=ink, width=round(lw))
+                    dr.line((x0, y0, x0, y0 - sy * L * k), fill=ink, width=round(lw))
+            oval(c, fy, b * 0.07, fill=ink)
         view_m = look_at(v.r.cam.eye(), v.r.cam.target)
         right, up, toward = view_m[0, :3], view_m[1, :3], view_m[2, :3]
         balls = []
@@ -1699,11 +1714,14 @@ class NavGizmo(tk.Canvas):
                 if hot:
                     dr.text((x * k, y * k), "-" + name, font=font, fill="#101014", anchor="mm")
             self._balls.append((x, y, br, name, sign, w))
-        self._photo = ImageTk.PhotoImage(img.resize((s, s), Image.LANCZOS), master=self)
+        self._photo = ImageTk.PhotoImage(img.resize((s, self.height), Image.LANCZOS), master=self)
         self.delete("all")
         self.create_image(0, 0, image=self._photo, anchor="nw")
 
     def _hit(self, x, y):
+        if self.on_frame and (x - self.size / 2) ** 2 + (y - self.size - self.gap - self.btn / 2) ** 2 <= \
+                (self.btn / 2) ** 2:
+            return "frame", 0, None
         for bx, by, br, name, sign, w in reversed(self._balls):  # front-most first
             if (x - bx) ** 2 + (y - by) ** 2 <= (br + 2) ** 2:
                 return name, sign, w
@@ -1719,10 +1737,18 @@ class NavGizmo(tk.Canvas):
 
     def _motion(self, e):
         hit = self._hit(e.x, e.y)
-        self._set_hover(hit[:2] if hit else ("ring", 0) if self._inside(e.x, e.y) else None)
+        h = hit[:2] if hit else ("ring", 0) if self._inside(e.x, e.y) else None
+        if h != self._hover and self.on_hint:
+            self.on_hint("Frame the model  (F)" if h and h[0] == "frame" else None)
+        self._set_hover(h)
         self.configure(cursor="hand2" if hit else "fleur" if self._inside(e.x, e.y) else "")
 
     def _down(self, e):
+        hit = self._hit(e.x, e.y)
+        if hit and hit[0] == "frame":
+            self._press = None
+            self.on_frame()
+            return
         self._press = (e.x, e.y, e.x, e.y, False)
 
     def _drag(self, e):
@@ -1740,7 +1766,7 @@ class NavGizmo(tk.Canvas):
         p, self._press = self._press, None
         if p and not p[4]:
             hit = self._hit(e.x, e.y)
-            if hit:
+            if hit and hit[0] != "frame":
                 self.view.snap_to(hit[2])
         self.request()
 

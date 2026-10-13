@@ -51,7 +51,7 @@ Open **Settings** (top right). An orange **Setup needed** bar tells you if anyth
 
 ## 3D viewer
 
-Open it with **View 3D** on an extraction or **Preview** in the catalog. The **Controls** button in the viewer lists these too.
+Open it with **View 3D** on an extraction or **Preview** in the catalog. The **Controls** button (bottom right of the view) lists these too.
 
 | Action | How |
 | --- | --- |
@@ -60,7 +60,7 @@ Open it with **View 3D** on an extraction or **Preview** in the catalog. The **C
 | Zoom | mouse wheel |
 | Snap to a side | click an axis ball on the circle in the top right corner (drag the circle to rotate) |
 | Look at a texture up close | open a part with ▸, click a texture name, then click its picture |
-| Frame the model | **F** or double-click |
+| Frame the model | **F**, double-click, or the button under the axis circle |
 | Free fly on / off | **Ctrl + F** or **Shift + `** (left-click or Esc also stops) |
 | Free fly | move the mouse to look, **W A S D** move, **Q** down, **E** up, wheel forward/back |
 | Fly speed | **Shift + mouse wheel** |

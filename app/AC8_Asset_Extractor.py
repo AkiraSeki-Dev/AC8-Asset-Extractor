@@ -3284,7 +3284,11 @@ class App(tk.Tk):
         self.glv = ac8_glview.GLView(self.view_host, bg=C["bg0"], on_error=self._view_fail,
                                      on_ready=self._view_ready)
         self.glv.on_fly = self._view_fly_changed
-        self.gizmo = ac8_glview.NavGizmo(self.glv, size=round(92 * SCALE), font_file=str(FONTS_DIR / "Outfit-Bold.ttf"))
+        self.gizmo = ac8_glview.NavGizmo(self.glv, size=round(92 * SCALE), font_file=str(FONTS_DIR / "Outfit-Bold.ttf"),
+                                         on_frame=lambda: self.glv and self.glv.frame(), on_hint=self._view_hint)
+        # bottom right of the view: the list of controls
+        self.view_controls_btn = Button(self.view_host, "Controls", self._view_controls, font=F["small"], padx=10,
+                                        pady=3)
         return self.glv
 
     def _view_ready(self, r):
@@ -3295,6 +3299,7 @@ class App(tk.Tk):
         self._glv_failed = why
         if getattr(self, "gizmo", None) is not None:
             self.gizmo.place_forget()
+            self.view_controls_btn.place_forget()
         if self.glv is not None:
             try:
                 self.glv.pack_forget()
@@ -3600,6 +3605,8 @@ class App(tk.Tk):
             self.glv.pack(fill="both", expand=True)
         if getattr(self, "gizmo", None) is not None and not self.gizmo.winfo_ismapped():
             self.gizmo.place_in(relx=1.0, x=-8, y=8, anchor="ne")
+            self.view_controls_btn.place(relx=1.0, rely=1.0, x=-8, y=-8, anchor="se")
+            self.view_controls_btn.lift()
         self._view_model, self._view_stats = model, stats
         self.glv.set_model(model, keep_camera=keep_camera, livery=spec)
         self._view_apply()
@@ -4186,6 +4193,10 @@ class App(tk.Tk):
         if ks == "f" and not ctrl:
             self.glv.frame()
 
+    def _view_hint(self, text):
+        m = self._view_model
+        self.v_view_status.set(text or (m.name if m is not None else ""))
+
     def _view_fly_changed(self, on):
         m = self._view_model
         self.v_view_status.set(self.FLY_HELP if on else (m.name if m is not None else ""))
@@ -4215,12 +4226,10 @@ class App(tk.Tk):
         head.pack(fill="x", pady=(0, 8))
         small = dict(font=F["small"], padx=10, pady=3)
         # right: actions
-        Button(head, "Controls", self._view_controls, **small).pack(side="right")
-        Button(head, "Open in browser", self._viewer_in_browser, **small).pack(side="right", padx=(0, 6))
+        Button(head, "Open in browser", self._viewer_in_browser, **small).pack(side="right")
         Button(head, "Screenshot", self._view_screenshot, **small).pack(side="right", padx=(0, 6))
         Button(head, "Export textures…", self._view_export_dialog, variant="primary", **small).pack(
             side="right", padx=(0, 6))
-        Button(head, "Frame model", lambda: self.glv and self.glv.frame(), **small).pack(side="right", padx=(0, 6))
         # left: what to show and how
         self.dd_view_model = Dropdown(head, "Model", self.v_view_model, [("", "—")], width=22,
                                       command=self._view_pick)
