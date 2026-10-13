@@ -713,18 +713,123 @@ class Dropdown(tk.Frame):
         enabled = len(self.options) > 1
         self.val.configure(fg=C["text1"] if enabled else C["text3"])
 
+    MAX_ROWS = 14
+
     def open(self, _e=None):
+        """A dark, scrollable list under the box (in the app's own style, instead of the system menu)."""
         if len(self.options) <= 1:
             return
-        m = tk.Menu(self, tearoff=0, bg=C["bg2"], fg=C["text1"], activebackground=C["accent"],
-                    activeforeground="#fff", bd=0, relief="flat", font=F["base"], activeborderwidth=0)
+        if getattr(self, "_pop", None) is not None and self._pop.winfo_exists():
+            self._close()
+            return
+        pop = self._pop = tk.Toplevel(self, bg=C["border3"])
+        pop.overrideredirect(True)
+        pop.attributes("-topmost", True)
+        rows_n = min(len(self.options), self.MAX_ROWS)
         cur = self.var.get()
+        frame = tk.Frame(pop, bg=C["bg2"])
+        frame.pack(fill="both", expand=True, padx=1, pady=1)
+        cv = tk.Canvas(frame, bg=C["bg2"], highlightthickness=0, bd=0)
+        inner = tk.Frame(cv, bg=C["bg2"])
+        cv.create_window(0, 0, window=inner, anchor="nw")
+        self._rows = []
         for i, (value, label) in enumerate(self.options):
-            m.add_command(label=("●  " if value == cur else "    ") + label,
-                          command=lambda v=value: self._pick(v))
-            if len(self.options) > 24 and i and i % 24 == 0:
-                m.entryconfigure(i, columnbreak=1)
-        m.tk_popup(self.winfo_rootx(), self.winfo_rooty() + self.winfo_height())
+            main, _, tag = label.partition("  (")
+            on = value == cur
+            row = tk.Frame(inner, bg=C["bg3"] if on else C["bg2"], cursor="hand2")
+            row.pack(fill="x")
+            bar = tk.Frame(row, bg=C["accent"] if on else (C["bg3"] if on else C["bg2"]), width=3)
+            bar.pack(side="left", fill="y")
+            l1 = tk.Label(row, text=main, bg=row["bg"], fg=C["accent"] if on else C["text1"], font=F["base"],
+                          anchor="w", padx=10, pady=4)
+            l1.pack(side="left")
+            parts = [row, bar, l1]
+            if tag:
+                l2 = tk.Label(row, text=tag.rstrip(")"), bg=row["bg"], fg=C["text3"], font=F["small"], padx=10)
+                l2.pack(side="right")
+                parts.append(l2)
+            for w in parts:
+                w.bind("<Button-1>", lambda e, v=value: (self._close(), self._pick(v)))
+                w.bind("<Enter>", lambda e, i=i: self._hover(i))
+            self._rows.append((row, parts, on))
+        inner.update_idletasks()
+        row_h = max(1, inner.winfo_reqheight() // max(1, len(self.options)))
+        w = max(self.winfo_width(), inner.winfo_reqwidth() + (16 if len(self.options) > rows_n else 0))
+        h = row_h * rows_n
+        cv.configure(width=w, height=h, scrollregion=(0, 0, w, inner.winfo_reqheight()))
+        cv.itemconfigure(1, width=w - (16 if len(self.options) > rows_n else 0))
+        if len(self.options) > rows_n:
+            sb = ttk.Scrollbar(frame, orient="vertical", command=cv.yview, style="Dark.Vertical.TScrollbar")
+            cv.configure(yscrollcommand=sb.set)
+            sb.pack(side="right", fill="y")
+        cv.pack(side="left", fill="both", expand=True)
+        # under the box, or above it when there's no room below
+        x, y = self.winfo_rootx(), self.winfo_rooty() + self.winfo_height() + 2
+        if y + h + 4 > self.winfo_screenheight():
+            y = self.winfo_rooty() - h - 4
+        pop.geometry(f"+{max(0, min(x, self.winfo_screenwidth() - w - 4))}+{max(0, y)}")
+        sel = next((i for i, (v, _l) in enumerate(self.options) if v == cur), 0)
+        self._hi = None
+        if len(self.options) > rows_n:  # show the selected one
+            cv.yview_moveto(max(0.0, (sel - rows_n // 2) / len(self.options)))
+
+        def wheel(e, d=None):
+            cv.yview_scroll(d if d is not None else (-1 if e.delta > 0 else 1) * 2, "units")
+            return "break"
+
+        for wdg in [cv, inner] + [p for _r, ps, _o in self._rows for p in ps]:
+            wdg.bind("<MouseWheel>", wheel)
+            wdg.bind("<Button-4>", lambda e: wheel(e, -2))
+            wdg.bind("<Button-5>", lambda e: wheel(e, 2))
+        pop.bind("<Escape>", lambda e: self._close())
+        pop.bind("<Up>", lambda e: self._key(-1, cv))
+        pop.bind("<Down>", lambda e: self._key(1, cv))
+        pop.bind("<Return>", lambda e: self._hi is not None and (self._close(), self._pick(self.options[self._hi][0])))
+        # a click anywhere else closes it
+        pop.bind("<ButtonPress-1>", lambda e: self._outside(e), add="+")
+        self._hover(sel)
+        pop.update_idletasks()
+        try:
+            pop.grab_set()
+        except tk.TclError:
+            pass
+        pop.focus_force()
+
+    def _outside(self, e):
+        p = self._pop
+        if p is None:
+            return
+        x, y = e.x_root - p.winfo_rootx(), e.y_root - p.winfo_rooty()
+        if not (0 <= x < p.winfo_width() and 0 <= y < p.winfo_height()):
+            self._close()
+
+    def _hover(self, i):
+        if self._hi is not None and self._hi < len(self._rows):
+            row, parts, on = self._rows[self._hi]
+            for p_ in parts[:1] + parts[2:]:
+                p_.configure(bg=C["bg3"] if on else C["bg2"])
+        self._hi = i
+        row, parts, on = self._rows[i]
+        for p_ in parts[:1] + parts[2:]:
+            p_.configure(bg=C["border3"])
+
+    def _key(self, d, cv):
+        i = max(0, min(len(self.options) - 1, (self._hi or 0) + d))
+        self._hover(i)
+        n = len(self.options)
+        top, bot = cv.yview()
+        if i / n < top or (i + 1) / n > bot:
+            cv.yview_moveto(max(0.0, (i - self.MAX_ROWS // 2) / n))
+        return "break"
+
+    def _close(self):
+        p, self._pop = getattr(self, "_pop", None), None
+        if p is not None:
+            try:
+                p.grab_release()
+                p.destroy()
+            except tk.TclError:
+                pass
 
     def _pick(self, value):
         self.var.set(value)
