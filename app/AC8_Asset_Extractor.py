@@ -863,7 +863,6 @@ class App(tk.Tk):
         self.v_pbr_preset = tk.StringVar(value=s.get("pbr_preset", "separate"))
         self.v_pbr_normal = tk.StringVar(value=s.get("pbr_normal", "auto"))
         self.settings_cat_width = int(s.get("catalog_list_width", 0) or 0)
-        self._tools_checked = s.get("tools_checked", "")  # date of the last quiet update check
         self._steam_prev = dict(s.get("steam_prev_launch", {}))  # localconfig.vdf -> launch options before ours
         self.v_keep_previews = tk.BooleanVar(value=bool(s.get("keep_previews", False)))  # off: wiped on quit
         self.v_bake_preset = tk.StringVar(value=s.get("bake_preset", s.get("pbr_preset", "separate")))
@@ -914,7 +913,7 @@ class App(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(100, self._pump)
         self.after(50, self._load_index_on_start)
-        self.after(3000, self._tools_update_note)
+        self.after(3000, self._startup_update_check)
         self.after(1500, self._tools_if_missing)
         try:
             import ac8_update
@@ -1008,6 +1007,20 @@ class App(tk.Tk):
                  font=F["base"]).pack(side="left", pady=7)
         Button(self.notice, "Open Settings", self.open_settings, font=F["small"], padx=10,
                pady=3).pack(side="right", padx=8, pady=5)
+
+        # "updates available" bar (filled in by the check at every start)
+        self.upd_bar = tk.Frame(self, bg=C["ok_tint"], highlightthickness=1, highlightbackground=C["ok_line"])
+        tk.Label(self.upd_bar, text="⬆", bg=C["ok_tint"], fg=C["ok"], font=F["bold"]).pack(side="left", padx=(12, 4))
+        self.v_upd = tk.StringVar()
+        tk.Label(self.upd_bar, textvariable=self.v_upd, bg=C["ok_tint"], fg=C["text1"], font=F["base"]).pack(
+            side="left", pady=7)
+        x_ = tk.Label(self.upd_bar, text="✕", bg=C["ok_tint"], fg=C["text3"], font=F["small"], cursor="hand2", padx=8)
+        x_.pack(side="right", padx=(0, 6))
+        x_.bind("<Button-1>", lambda e: self.upd_bar.pack_forget())
+        self.upd_btn_tools = Button(self.upd_bar, "Update tools", lambda: (self.upd_bar.pack_forget(), self.fetch_tools()),
+                                    font=F["small"], padx=10, pady=3)
+        self.upd_btn_app = Button(self.upd_bar, "Update app", lambda: (self.upd_bar.pack_forget(), self.update_app()),
+                                  variant="primary", font=F["small"], padx=10, pady=3)
 
         # tab bar
         self.tabbar = tk.Frame(self, bg=C["bg0"])
@@ -1760,7 +1773,6 @@ class App(tk.Tk):
                 "pbr_auto": self.v_pbr_auto.get(), "pbr_preset": self.v_pbr_preset.get(),
                 "pbr_normal": self.v_pbr_normal.get(), "bake_preset": self.v_bake_preset.get(),
                 "keep_previews": self.v_keep_previews.get(), "steam_prev_launch": self._steam_prev,
-                "tools_checked": self._tools_checked,
                 "catalog_list_width": self._cat_list_width(),
                 "bake_size": self.v_bake_size.get(), "bake_normal": self.v_bake_normal.get(), "view_mode": self.v_view_mode.get() if not self.v_view_mode.get().startswith("tex_") else "lit", "view_grid": self.v_view_grid.get(),
                 "view_bg": self.v_view_bg.get(),
@@ -2525,36 +2537,44 @@ class App(tk.Tk):
             messagebox.showinfo(APP_NAME, f"Updated. Please start the app again.\n\n({e})")
         self._on_close()
 
-    def _tools_update_note(self):
-        """Once a day, quietly: tell the user (in the log) when retoc / repak have a newer release."""
-        if not UNPACKER_DIR:
-            return
-        today = _dt.date.today().isoformat()
-        if self._tools_checked == today:
-            return
-        self._tools_checked = today
+    def _startup_update_check(self):
+        """Every time the app starts, quietly: is there a newer app, retoc or repak? Shown in a bar (and the log)."""
         import ac8_tools
-        tools = UNPACKER_DIR / "tools"
+        tools = UNPACKER_DIR / "tools" if UNPACKER_DIR else None
 
         def run():
-            try:
-                found = ac8_tools.check(tools)
-            except Exception:
-                return
-            for name, (have, ver, _url, err) in found.items():
-                if not err and have and ac8_tools.newer(ver, have):
-                    self.post("log", f"Update available: {name} {ver} (you have {have}) — Settings → Check for "
-                                     "updates")
+            app_new, tool_new = None, []
             try:
                 import ac8_update
                 info = ac8_update.latest()
                 if ac8_update.newer(info["version"], APP_VERSION):
-                    self.post("log", f"App update available: v{info['version']} (you have v{APP_VERSION}) — "
-                                     "Settings → APP → Check for updates")
+                    app_new = info["version"]
             except Exception:
                 pass
+            if tools is not None:
+                try:
+                    for name, (have, ver, _url, err) in ac8_tools.check(tools).items():
+                        if not err and have and ac8_tools.newer(ver, have):
+                            tool_new.append(f"{name} {ver} (you have {have})")
+                except Exception:
+                    pass
+            if app_new or tool_new:
+                self.post("call", lambda: self._show_updates(app_new, tool_new))
 
         threading.Thread(target=run, daemon=True).start()
+
+    def _show_updates(self, app_new, tool_new):
+        parts = ([f"App v{app_new} (you have v{APP_VERSION})"] if app_new else []) + tool_new
+        self.v_upd.set("Updates available: " + " · ".join(parts))
+        for b in (self.upd_btn_app, self.upd_btn_tools):
+            b.pack_forget()
+        if tool_new:
+            self.upd_btn_tools.pack(side="right", padx=(0, 6), pady=5)
+        if app_new:
+            self.upd_btn_app.pack(side="right", padx=(0, 6), pady=5)
+        self.upd_bar.pack(fill="x", padx=18, pady=(12, 0), before=self.body)
+        for p_ in parts:
+            self.post("log", f"Update available: {p_}")
 
     def install_packages(self):
         pkgs = list(dict.fromkeys(PACKAGES.values()))

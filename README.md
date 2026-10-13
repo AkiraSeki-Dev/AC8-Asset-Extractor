@@ -103,7 +103,8 @@ AC8 Asset Extractor\
 
 - **The app:** Settings → APP → **Check for updates**. Your settings, file list, exports and key are kept.
 - **The unpacking tools:** Settings → SETUP → **Check for updates**.
-- The app checks once a day by itself (app and tools) and notes any update in the log at the bottom.
+- Every time it starts, the app checks for a newer app, retoc and repak. If there is one, a green bar shows it with
+  **Update app** / **Update tools** buttons.
 
 ## Tips
 
