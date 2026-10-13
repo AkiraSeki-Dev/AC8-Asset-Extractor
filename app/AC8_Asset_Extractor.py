@@ -817,6 +817,18 @@ class Dropdown(tk.Frame):
         pop.bind("<Return>", lambda e: self._hi is not None and (self._close(), self._pick(self.options[self._hi][0])))
         # a click anywhere else closes it
         pop.bind("<ButtonPress-1>", lambda e: self._outside(e), add="+")
+        # ...and so does moving, resizing or minimising the app window, or switching to another program
+        # (it's a separate window, so it wouldn't follow the app)
+        top = self.winfo_toplevel()
+        geo = top.winfo_geometry()
+
+        def moved(_e=None):
+            if self._pop is pop and top.winfo_geometry() != geo:
+                self._close()
+        self._watch = [(top, "<Configure>", top.bind("<Configure>", moved, add="+")),
+                       (top, "<Unmap>", top.bind("<Unmap>", lambda e: self._close(), add="+"))]
+        pop.bind("<FocusOut>", lambda e: pop.after(80, lambda: self._pop is pop and pop.focus_get() is None
+                                                   and self._close()))
         self._hover(sel)
         pop.update_idletasks()
         try:
@@ -854,6 +866,14 @@ class Dropdown(tk.Frame):
 
     def _close(self):
         p, self._pop = getattr(self, "_pop", None), None
+        for wdg, seq, fid in getattr(self, "_watch", ()):
+            try:  # remove just this binding (older Pythons' unbind(seq, id) drops every binding of seq)
+                keep = [ln for ln in wdg.bind(seq).split("\n") if not ln.startswith(f'if {{"[{fid} ')]
+                wdg.bind(seq, "\n".join(keep) if any(k.strip() for k in keep) else "")
+                wdg.deletecommand(fid)
+            except tk.TclError:
+                pass
+        self._watch = []
         if p is not None:
             try:
                 p.grab_release()
