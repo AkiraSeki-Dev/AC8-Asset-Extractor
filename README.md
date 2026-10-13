@@ -104,6 +104,18 @@ AC8 Asset Extractor\
 
 ## Version history
 
+v1.2.1: a better 3D viewer and catalog.
+- Viewer controls work like Blender: middle-drag rotate, Shift+middle-drag pan, wheel zoom. **Ctrl+F** (or
+  Shift+`) turns on free fly: mouse look, W A S D, Q down, E up; left-click or Esc to stop. The **Controls** button
+  lists everything.
+- An axis circle in the top right: click a ball to look from that side, drag it to rotate. The button under it
+  frames the model.
+- Bosses: **Preview whole vehicle** in the catalog, and **Model → All parts together** shows every part at once.
+- Click a texture's preview to open it full size (zoom, pan, R/G/B/A channels). Clicking a texture no longer
+  changes the 3D view's shading.
+- Fixed the resize cursor getting stuck over the catalog list. Online characters moved to **Online avatars**.
+- "Tick" is now "Select" everywhere; the version number shows under the title.
+
 v1.2: fixed in-app updates failing with "Access is denied" on the app's font (Windows keeps it locked while the app
 runs). Updates now skip unchanged files, swap all changed files in together, and finish any locked file the next
 time the app starts.
