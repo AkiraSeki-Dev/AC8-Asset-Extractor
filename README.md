@@ -59,8 +59,9 @@ Open it with **View 3D** on an extraction or **Preview** in the catalog.
 | Pan | **Shift** + middle-drag (or right-drag) |
 | Zoom | mouse wheel |
 | Snap to a side | click an axis ball on the circle in the top right corner (drag the circle to rotate) |
+| Look at a texture up close | open a part with ▸, click a texture name, then click its picture |
 | Frame the model | **F** or double-click |
-| Free fly on / off | **Ctrl + F** or **Shift + `** (Esc also stops) |
+| Free fly on / off | **Ctrl + F** or **Shift + `** (left-click or Esc also stops) |
 | Free fly | move the mouse to look, **W A S D** move, **Q** down, **E** up, wheel forward/back |
 | Fly speed | **Shift + mouse wheel** |
 | Field of view | **Alt + mouse wheel** |

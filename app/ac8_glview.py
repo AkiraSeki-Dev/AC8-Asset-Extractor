@@ -103,6 +103,7 @@ class Model:
         self.name = os.path.splitext(os.path.basename(path))[0]
         self.prims, self.materials, self.images = [], [], {}
         self.image_names, self.image_sizes, self.thumbs = {}, {}, {}  # per image index
+        self.image_src = {}    # per image index: (glb path, bufferView, uri) — to load it again at full size
         self.nodes = []        # dicts: name, children, t, r, s, mesh, skin
         self.roots = []
         self.joints = []       # node index per skin joint
@@ -110,6 +111,27 @@ class Model:
         self.skinned_nodes = set()
         self.lo = self.hi = np.zeros(3)
         self.mat_src = None    # after merge_models: source model name per material
+
+
+def load_full_image(src):
+    """A texture of a GLB at full size (PIL image) from Model.image_src."""
+    from PIL import Image
+    path, bv, uri = src
+    if bv is None:
+        return Image.open(os.path.join(os.path.dirname(path), uri))
+    with open(path, "rb") as fh:
+        data = fh.read()
+    off, j, binc = 12, None, b""
+    while off < len(data):
+        clen, ctype = struct.unpack_from("<I4s", data, off)
+        if ctype == b"JSON":
+            j = json.loads(data[off + 8:off + 8 + clen])
+        elif ctype == b"BIN\0":
+            binc = data[off + 8:off + 8 + clen]
+        off += 8 + clen
+    v = j["bufferViews"][bv]
+    o = v.get("byteOffset", 0)
+    return Image.open(io.BytesIO(binc[o:o + v["byteLength"]]))
 
 
 def load_glb(path, max_texture=MAX_VIEW_TEXTURE, cache=None):
@@ -181,6 +203,7 @@ def load_glb(path, max_texture=MAX_VIEW_TEXTURE, cache=None):
             im = j["images"][ii]
             m.image_names[ii] = im.get("name") or os.path.splitext(os.path.basename(im.get("uri", "")))[0] or \
                 f"image {ii}"
+            m.image_src[ii] = (os.fspath(path), im.get("bufferView"), im.get("uri"))
             if "bufferView" in im:
                 raw, _ = view_bytes(im["bufferView"])
                 key = hashlib.blake2b(raw, digest_size=16).digest()
@@ -334,6 +357,8 @@ def merge_models(main, extras):
                 remap[i] = have[id(v)] = i + io
                 main.images[i + io], main.image_names[i + io] = v, ex.image_names.get(i, f"image {i}")
                 main.image_sizes[i + io], main.thumbs[i + io] = ex.image_sizes.get(i), ex.thumbs.get(i)
+                if i in ex.image_src:
+                    main.image_src[i + io] = ex.image_src[i]
         for i, v in ex.image_names.items():  # images that failed to decode: keep their names
             if i not in remap:
                 main.image_names[i + io] = v
@@ -1752,6 +1777,8 @@ class _ViewMixin:
         w.bind("<Shift-ButtonPress-1>", lambda e: self._press(e, "pan"))
         w.bind("<Shift-ButtonPress-2>", lambda e: self._press(e, "pan"))
         w.winfo_toplevel().bind("<Motion>", self._fly_look, add="+")
+        # free fly: a left click anywhere goes back to the normal (Blender) controls, keeping the view
+        w.winfo_toplevel().bind("<ButtonPress-1>", lambda e: self.fly and self.set_fly(False), add="+")
         for b in (1, 2, 3):
             w.bind(f"<B{b}-Motion>", self._motion)
             w.bind(f"<ButtonRelease-{b}>", lambda e: setattr(self, "_drag", None))

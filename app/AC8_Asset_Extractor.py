@@ -20,6 +20,7 @@ Start it with "AC8 Asset Extractor.exe" (built from launcher/), or:  python AC8_
 import datetime as _dt
 import importlib.util
 import json
+import math
 import os
 import queue
 import re
@@ -3688,7 +3689,9 @@ class App(tk.Tk):
             self._view_folds[name] = toggle
         if not groups:
             tk.Label(self.view_parts, text="No parts", bg=C["bg1"], fg=C["text3"], font=F["small"]).pack()
-        self.view_tex_preview.configure(image=self._blank_thumb(), text="Click a texture name to see it here.")
+        self._view_tex_shown = None
+        self.view_tex_preview.configure(image=self._blank_thumb(), text="Click a texture name to see it here.",
+                                        cursor="")
         self.v_view_tex_info.set("Open a part with ▸ to see its textures.")
 
     def _view_expand_all(self, on):
@@ -3706,8 +3709,130 @@ class App(tk.Tk):
         self._view_thumb_imgs = [img]
         self.view_tex_preview.configure(image=img, text="")
         w, h = m.image_sizes.get(ii, th.size)
-        self.v_view_tex_info.set(f"{m.image_names[ii]}\n{w} × {h}  ·  used as {role_name(role)} on {part}")
+        self.v_view_tex_info.set(f"{m.image_names[ii]}\n{w} × {h}  ·  used as {role_name(role)} on {part}"
+                                 "\nClick the picture to open it bigger")
+        self._view_tex_shown = (ii, role, part)
+        self.view_tex_preview.configure(cursor="hand2")
         # only the preview box changes; the 3D view keeps its shading (MAP picks a texture view there)
+
+    def _view_tex_big(self):
+        """The texture in the preview box, in its own window: wheel zoom (at the mouse), drag to move, channels."""
+        shown, m = getattr(self, "_view_tex_shown", None), self._view_model
+        if not shown or m is None:
+            return
+        ii, role, part = shown
+        from PIL import Image, ImageTk
+        import ac8_glview
+        try:
+            src = ac8_glview.load_full_image(m.image_src[ii])
+        except Exception as e:
+            SLOG.exc("Viewer: full-size texture")
+            src = m.thumbs.get(ii)
+            self._log(f"  Couldn't load the full-size texture ({e}); showing the small preview", "warn")
+        if src is None:
+            return
+        src = src.convert("RGBA")
+        name = m.image_names.get(ii, "texture")
+        fw, fh = m.image_sizes.get(ii, src.size)
+        w = tk.Toplevel(self, bg=C["bg0"])
+        w.title(f"{name}  ({fw} × {fh})")
+        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+        side = min(round(sh * 0.8), round(sw * 0.8), max(src.size) + 40)
+        w.geometry(f"{max(side, 420)}x{max(side, 420) + 60}")
+        top = tk.Frame(w, bg=C["bg0"], padx=10, pady=8)
+        top.pack(fill="x")
+        chan = tk.StringVar(value="all")
+        opts = [("all", "RGB" if role != "base" else "Colour"), ("r", "R"), ("g", "G"), ("b", "B"), ("a", "A")]
+        Segmented(top, chan, opts, compact=True).pack(side="left")
+        info = tk.StringVar()
+        tk.Label(top, text="wheel zoom · drag move · double-click fit · Esc close", bg=C["bg0"], fg=C["text3"],
+                 font=F["small"]).pack(side="left", padx=10)
+        tk.Label(w, textvariable=info, bg=C["bg0"], fg=C["text2"], font=F["small"], anchor="w",
+                 padx=10).pack(fill="x", side="bottom", pady=(0, 6))
+        cv = tk.Canvas(w, bg=C["bg0"], highlightthickness=0, bd=0, cursor="fleur")
+        cv.pack(fill="both", expand=True)
+        tip = {"mr": "  ·  R = occlusion, G = roughness, B = metal"}.get(role, "")
+        st = {"img": None, "scale": 1.0, "ox": 0.0, "oy": 0.0, "drag": None, "photo": None}
+
+        def checker(size):
+            c = Image.new("RGBA", size, "#2a2a2e")
+            tile = Image.new("RGBA", (16, 16), "#3a3a40")
+            for y in range(0, size[1], 32):
+                for x in range(0, size[0], 32):
+                    c.paste(tile, (x, y))
+                    c.paste(tile, (x + 16, y + 16))
+            return c
+
+        def set_chan(*_):
+            c = chan.get()
+            if c == "all":
+                st["img"] = Image.alpha_composite(checker(src.size), src).convert("RGB")
+            else:
+                st["img"] = src.getchannel("RGBA".index(c.upper())).convert("RGB")
+            draw()
+
+        def fit():
+            cw, ch = max(cv.winfo_width(), 50), max(cv.winfo_height(), 50)
+            iw, ih = src.size
+            st["scale"] = min(cw / iw, ch / ih) * 0.96
+            st["ox"] = (iw - cw / st["scale"]) / 2
+            st["oy"] = (ih - ch / st["scale"]) / 2
+            draw()
+
+        def draw():
+            img = st["img"]
+            if img is None:
+                return
+            cw, ch = max(cv.winfo_width(), 1), max(cv.winfo_height(), 1)
+            k, ox, oy = st["scale"], st["ox"], st["oy"]
+            iw, ih = img.size
+            x0, y0 = max(0.0, ox), max(0.0, oy)
+            x1, y1 = min(float(iw), ox + cw / k), min(float(ih), oy + ch / k)
+            cv.delete("all")
+            if x1 > x0 and y1 > y0:
+                box = (int(x0), int(y0), min(iw, int(math.ceil(x1))), min(ih, int(math.ceil(y1))))
+                part_img = img.crop(box)
+                dw = max(1, round((box[2] - box[0]) * k))
+                dh = max(1, round((box[3] - box[1]) * k))
+                part_img = part_img.resize((dw, dh), Image.NEAREST if k >= 2 else Image.BILINEAR,
+                                           reducing_gap=None if k >= 1 else 2.0)
+                st["photo"] = ImageTk.PhotoImage(part_img, master=cv)
+                cv.create_image(round((box[0] - ox) * k), round((box[1] - oy) * k), image=st["photo"], anchor="nw")
+            info.set(f"{name}  ·  {fw} × {fh}  ·  {k * 100 * src.size[0] / fw:.0f}%{tip}")
+
+        def zoom(e, steps):
+            k0 = st["scale"]
+            k1 = min(max(k0 * (1.25 ** steps), 0.02), 64.0)
+            px, py = st["ox"] + e.x / k0, st["oy"] + e.y / k0
+            st["scale"], st["ox"], st["oy"] = k1, px - e.x / k1, py - e.y / k1
+            draw()
+            return "break"
+
+        def press(e):
+            st["drag"] = (e.x, e.y)
+
+        def move(e):
+            if st["drag"]:
+                dx, dy = e.x - st["drag"][0], e.y - st["drag"][1]
+                st["ox"] -= dx / st["scale"]
+                st["oy"] -= dy / st["scale"]
+                st["drag"] = (e.x, e.y)
+                draw()
+
+        cv.bind("<MouseWheel>", lambda e: zoom(e, 1 if e.delta > 0 else -1))
+        cv.bind("<Button-4>", lambda e: zoom(e, 1))
+        cv.bind("<Button-5>", lambda e: zoom(e, -1))
+        cv.bind("<ButtonPress-1>", press)
+        cv.bind("<B1-Motion>", move)
+        cv.bind("<ButtonRelease-1>", lambda e: st.update(drag=None))
+        cv.bind("<Double-Button-1>", lambda e: fit())
+        cv.bind("<Configure>", lambda e: draw())
+        w.bind("<Escape>", lambda e: w.destroy())
+        watch(w, chan, set_chan)
+        st["img"] = None
+        set_chan()
+        w.after(60, fit)
+        w.focus_set()
 
     def _view_tex_changed(self):
         if self.glv is None or self.glv.r is None:
@@ -4009,7 +4134,7 @@ class App(tk.Tk):
             messagebox.showerror(APP_NAME, f"Couldn't save the screenshot:\n{e}")
 
     FLY_HELP = "Free fly: move the mouse to look · W A S D move · Q down · E up · wheel forward/back · " \
-               "Shift+wheel speed · Alt+wheel field of view · Ctrl+F or Esc to stop"
+               "Shift+wheel speed · Alt+wheel field of view · left-click, Ctrl+F or Esc to stop"
 
     def _view_key(self, e):
         if self.tab != "viewer" or isinstance(self.focus_get(), tk.Entry) or self.glv is None:
@@ -4131,6 +4256,7 @@ class App(tk.Tk):
                                          width=round(96 * SCALE), height=round(96 * SCALE), compound="center",
                                          wraplength=round(90 * SCALE))
         self.view_tex_preview.pack(side="left")
+        self.view_tex_preview.bind("<Button-1>", lambda e: self._view_tex_big())
         self.v_view_tex_info = tk.StringVar(value="")
         tk.Label(pv, textvariable=self.v_view_tex_info, bg=C["bg1"], fg=C["text2"], font=F["small"], justify="left",
                  anchor="nw", wraplength=round(230 * SCALE)).pack(side="left", fill="both", expand=True, padx=(10, 0))
