@@ -3284,6 +3284,11 @@ class App(tk.Tk):
         self.glv.on_fly = self._view_fly_changed
         self.gizmo = ac8_glview.NavGizmo(self.glv, size=round(92 * SCALE), font_file=str(FONTS_DIR / "Outfit-Bold.ttf"),
                                          on_frame=lambda: self.glv and self.glv.frame(), on_hint=self._view_hint)
+        # left side of the view: move / rotate bone tools (G / R)
+        self.view_tools = ac8_glview.ToolBar(self.glv, size=round(32 * SCALE), on_change=self._view_tool_changed,
+                                             on_hint=self._view_hint)
+        self.glv.on_bone_pick = self._view_pick_bone
+        self.glv.on_pose = self._view_pose_changed
         # bottom right of the view: the list of controls
         self.view_controls_btn = Button(self.view_host, "Controls", self._view_controls, font=F["small"], padx=10,
                                         pady=3)
@@ -3298,6 +3303,7 @@ class App(tk.Tk):
         if getattr(self, "gizmo", None) is not None:
             self.gizmo.place_forget()
             self.view_controls_btn.place_forget()
+            self.view_tools.place_forget()
         if self.glv is not None:
             try:
                 self.glv.pack_forget()
@@ -3609,6 +3615,12 @@ class App(tk.Tk):
         self._view_apply()
         self._fill_view_parts()
         self._fill_view_bones()
+        if getattr(self, "view_tools", None) is not None:
+            if model.joints:
+                self.view_tools.place_in(x=8, rely=0.5, anchor="w")
+            else:
+                self.view_tools.set_active(None)
+                self.view_tools.place_forget()
         self._fill_view_info()
         n = len(self._view_files)
         lv = self._view_livery_entry()
@@ -3897,7 +3909,7 @@ class App(tk.Tk):
         self.view_bone_name.set(self._view_model.nodes[jn]["name"])
         if self.glv and self.glv.r:
             self.glv.r.opts["bone"] = k
-            self._set_bone_sliders(self.glv.r.opts["pose"].get(jn, (0, 0, 0)))
+            self._set_bone_sliders(self.glv.r.opts["pose"].get(jn, (0, 0, 0))[:3])
             if not self.v_view_skel.get():
                 self.v_view_skel.set(True)
                 self._view_apply()
@@ -3912,7 +3924,43 @@ class App(tk.Tk):
     def _view_bone_rot(self, _v=None):
         if getattr(self, "_bone_sync", False) or self._view_bone is None or self.glv is None or self.glv.r is None:
             return
-        self.glv.set_pose(self._view_bone, tuple(float(sc.get()) for sc in self.view_rot))
+        want = tuple(float(sc.get()) for sc in self.view_rot)
+        jn = self._view_model.joints[self._view_bone]
+        cur = self.glv.r.opts["pose"].get(jn, (0, 0, 0))[:3]
+        if all(abs(round(c) - w) < 0.5 for c, w in zip(cur, want)):
+            return  # the sliders only echo the pose (they're whole degrees; the gizmo isn't): keep it exact
+        self.glv.set_pose(self._view_bone, want)
+
+    def _view_tool_changed(self, tool):
+        m = self._view_model
+        if tool is None:
+            self._view_hint(None)
+            return
+        if m is None or not m.joints:
+            return
+        if not self.v_view_skel.get():  # bones have to be visible to click them
+            self.v_view_skel.set(True)
+            self._view_apply()
+        self.v_view_panel.set("bones")
+        self.v_view_status.set(("Move" if tool == "move" else "Rotate") + " · " +
+                               ("drag an arrow" if tool == "move" else "drag a ring") +
+                               (" of the selected bone" if self._view_bone is not None else " · click a bone first"))
+
+    def _view_pick_bone(self, k):
+        lb = self.view_bones
+        lb.selection_clear(0, "end")
+        lb.selection_set(k)
+        lb.see(k)
+        self.v_view_panel.set("bones")
+        self._view_bone_selected()
+        if self.view_tools.active:
+            self._view_tool_changed(self.view_tools.active)
+
+    def _view_pose_changed(self, k):
+        if k != self._view_bone or self.glv is None or self.glv.r is None:
+            return
+        jn = self._view_model.joints[k]
+        self._set_bone_sliders(self.glv.r.opts["pose"].get(jn, (0, 0, 0))[:3])
 
     def _view_reset_pose(self):
         if self.glv and self.glv.r:
@@ -4147,6 +4195,9 @@ class App(tk.Tk):
                       ("Look around", "Move the mouse"), ("Move", "W  A  S  D"), ("Down / up", "Q  /  E"),
                       ("Forward / back", "Mouse wheel"), ("Faster", "Hold Shift"))),
         ("Both", (("Fly speed", "Shift + mouse wheel"), ("Field of view", "Alt + mouse wheel"))),
+        ("Bones", (("Move tool / Rotate tool", "G  /  R  (or the buttons on the left)"),
+                   ("Pick a bone", "Click it  (Skeleton on)"), ("Move", "Drag an arrow"),
+                   ("Rotate (the bone's own X Y Z)", "Drag a ring"), ("Put the tool away", "G / R again"))),
     )
 
     def _view_controls(self):
@@ -4186,6 +4237,11 @@ class App(tk.Tk):
             self.glv.set_fly(False)
             return "break"
         if self.glv.key_down(e.keysym):  # free fly: W A S D Q E (Shift faster)
+            return "break"
+        if ks in ("g", "r") and not ctrl and getattr(self, "view_tools", None) is not None \
+                and self.view_tools.winfo_ismapped():  # bone tools: G move, R rotate (again: put it away)
+            t = "move" if ks == "g" else "rotate"
+            self.view_tools.set_active(None if self.view_tools.active == t else t)
             return "break"
         if ks == "f" and not ctrl:
             self.glv.frame()

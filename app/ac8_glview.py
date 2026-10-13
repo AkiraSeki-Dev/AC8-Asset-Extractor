@@ -56,6 +56,17 @@ def euler_mat(rx, ry, rz):
     return Z @ Y @ X
 
 
+def mat_euler(m):
+    """Inverse of euler_mat: (rx, ry, rz) degrees of a rotation matrix R = Z @ Y @ X."""
+    r = np.asarray(m, np.float64)[:3, :3]
+    ry = math.asin(max(-1.0, min(1.0, -r[2, 0])))
+    if abs(r[2, 0]) < 0.999999:
+        rx, rz = math.atan2(r[2, 1], r[2, 2]), math.atan2(r[1, 0], r[0, 0])
+    else:  # gimbal lock: put it all in X
+        rx, rz = math.atan2(-r[1, 2], r[1, 1]), 0.0
+    return tuple(math.degrees(v) for v in (rx, ry, rz))
+
+
 def perspective(fov_deg, aspect, near, far):
     f = 1.0 / math.tan(math.radians(fov_deg) / 2)
     return np.array([[f / aspect, 0, 0, 0], [0, f, 0, 0],
@@ -318,14 +329,20 @@ def flat_normals(pos, idx):
 
 
 def node_worlds(m, pose):
-    """World matrix of every node; pose = {node index: (rx, ry, rz) degrees} added on top of the rest pose."""
+    """World matrix of every node; pose = {node index: (rx, ry, rz[, tx, ty, tz])} added on top of the rest pose:
+    a move (in the bone's rest axes, before its scale) and a turn (degrees, local X then Y then Z)."""
     world = [None] * len(m.nodes)
 
     def walk(i, parent):
         nd = m.nodes[i]
         local = trs(nd["t"], nd["r"], (1, 1, 1))
         if i in pose:
-            local = local @ euler_mat(*pose[i])
+            pz = pose[i]
+            if len(pz) > 3 and any(pz[3:6]):
+                tm = np.identity(4)
+                tm[:3, 3] = pz[3:6]
+                local = local @ tm
+            local = local @ euler_mat(*pz[:3])
         local[:3, :3] = local[:3, :3] * np.asarray(nd["s"])[None, :]
         world[i] = parent @ local
         for c in nd["children"]:
@@ -977,7 +994,7 @@ class Renderer:
         self.gpu = []          # per prim: (vao, buffers, count, index type)
         self.textures = {}     # image index -> GL texture
         self.opts = {"mode": "lit", "wire": False, "skeleton": False, "grid": True, "bg": "dark",
-                     "hidden": set(), "pose": {}, "bone": None,
+                     "hidden": set(), "pose": {}, "bone": None, "tool": None, "gizmo_hover": None,
                      "tex_off": set()}  # (material index, role) pairs switched off
         self.cam = Camera()
         self.livery = None
@@ -1309,6 +1326,7 @@ class Renderer:
             self._draw_model(vp)
             if self.opts["skeleton"] and self.model.joints:
                 self._draw_skeleton(vp)
+            self._draw_bone_gizmo(vp)
         # resolve the multisampled image into a plain buffer of the same format
         GL.glBindFramebuffer(GL.GL_READ_FRAMEBUFFER, self.fbo)
         GL.glBindFramebuffer(GL.GL_DRAW_FRAMEBUFFER, self.resolve)
@@ -1509,6 +1527,52 @@ class Renderer:
                     (cx - n * step, y, cz + k * step), (cx + n * step, y, cz + k * step)]
             cols += [c] * 4
         self._lines(vp, pts, cols)
+
+    # ------------------------------------------------------------- bone move / rotate gizmo
+    GIZMO_COLS = ((1.0, 0.2, 0.32), (0.55, 0.86, 0.0), (0.16, 0.56, 1.0))  # the bone's own X, Y, Z
+    RING_SEGS = 72
+
+    def gizmo_frame(self):
+        """(head, 3x3 unit axes as columns, length in world units) of the move/rotate gizmo, or None."""
+        m, k, tool = self.model, self.opts.get("bone"), self.opts.get("tool")
+        if m is None or k is None or tool is None or not m.joints or k >= len(m.joints):
+            return None
+        w = self.world[m.joints[k]]
+        head = w[:3, 3].copy()
+        axes = w[:3, :3] / np.maximum(np.linalg.norm(w[:3, :3], axis=0), 1e-12)[None, :]
+        dist = float(np.linalg.norm(self.cam.eye() - head))
+        return head, axes, max(dist * math.tan(math.radians(self.cam.fov) / 2) * 0.28, 1e-4)
+
+    def gizmo_ring(self, head, axes, L, a):
+        """Points of the rotate ring around axis a (in the plane of the other two)."""
+        u, v = axes[:, (a + 1) % 3], axes[:, (a + 2) % 3]
+        t = np.linspace(0, 2 * math.pi, self.RING_SEGS + 1)
+        return head[None, :] + L * (np.cos(t)[:, None] * u[None, :] + np.sin(t)[:, None] * v[None, :])
+
+    def _draw_bone_gizmo(self, vp):
+        g = self.gizmo_frame()
+        if g is None:
+            return
+        head, axes, L = g
+        hover = self.opts.get("gizmo_hover")
+        pts, cols, tips, tcols = [], [], [], []
+        for a in range(3):
+            c = (1.0, 0.85, 0.3, 1.0) if hover == a else (*self.GIZMO_COLS[a], 1.0)
+            if self.opts["tool"] == "move":
+                end = head + axes[:, a] * L
+                pts += [head, end]
+                cols += [c, c]
+                tips.append(end)
+                tcols.append(c)
+            else:
+                ring = self.gizmo_ring(head, axes, L, a)
+                for i in range(len(ring) - 1):
+                    pts += [ring[i], ring[i + 1]]
+                    cols += [c, c]
+        self._lines(vp, pts, cols, width=3.0, depth=False)
+        if tips:
+            self._lines(vp, tips, tcols, depth=False, points=11.0)
+        self._lines(vp, [head], [(1, 1, 1, 1)], depth=False, points=7.0)
 
     def _draw_skeleton(self, vp):
         m = self.model
@@ -1726,6 +1790,105 @@ class NavGizmo(tk.Canvas):
         self.request()
 
 
+class ToolBar(tk.Canvas):
+    """Blender-style tool buttons for the bone gizmo, stacked: move (G) and rotate (R). Click one to use it, click
+    it again to put it away."""
+
+    TOOLS = (("move", "Move bone  (G)"), ("rotate", "Rotate bone  (R)"))
+    SS = 4
+
+    def __init__(self, view, size=34, on_change=None, on_hint=None):
+        self.bs, self.gap = size, 3
+        h = len(self.TOOLS) * size + (len(self.TOOLS) - 1) * self.gap
+        tk.Canvas.__init__(self, view.master, width=size, height=h, highlightthickness=0, bd=0,
+                           bg=NavGizmo._bg(view), cursor="hand2")
+        self.view, self.on_change, self.on_hint = view, on_change, on_hint
+        self.active, self._hover, self._photo, self._job, self.drawn_bg = None, None, None, None, None
+        view.toolbar = self
+        self.bind("<Motion>", self._motion)
+        self.bind("<Leave>", lambda e: self._set_hover(None))
+        self.bind("<ButtonPress-1>", self._click)
+        self.request()
+
+    def request(self):
+        if self._job is None:
+            try:
+                self._job = self.after_idle(self.draw)
+            except tk.TclError:
+                pass
+
+    def place_in(self, **kw):
+        self.place(**kw)
+        self.tk.call("raise", self._w)
+
+    def _at(self, y):
+        i = int(y // (self.bs + self.gap))
+        return self.TOOLS[i][0] if 0 <= i < len(self.TOOLS) and y - i * (self.bs + self.gap) <= self.bs else None
+
+    def _set_hover(self, t):
+        if t != self._hover:
+            self._hover = t
+            if self.on_hint:
+                self.on_hint(dict(self.TOOLS).get(t) if t else None)
+            self.request()
+
+    def _motion(self, e):
+        self._set_hover(self._at(e.y))
+
+    def _click(self, e):
+        t = self._at(e.y)
+        if t:
+            self.set_active(None if t == self.active else t)
+
+    def set_active(self, tool):
+        self.active = tool
+        self.view.set_tool(tool)
+        self.request()
+        if self.on_change:
+            self.on_change(tool)
+
+    def draw(self):
+        self._job = None
+        from PIL import Image, ImageDraw, ImageTk
+        v, k, b = self.view, self.SS, self.bs
+        bg = self.drawn_bg = NavGizmo._bg(v)
+        self.configure(bg=bg)
+        light = v.r is not None and v.r.opts.get("bg") == "light"
+        h = int(self["height"])
+        img = Image.new("RGB", (b * k, h * k), bg)
+        dr = ImageDraw.Draw(img)
+        for i, (t, _tip) in enumerate(self.TOOLS):
+            y0 = i * (b + self.gap)
+            on, hot = t == self.active, t == self._hover
+            fill = "#4772b3" if on else (("#bcbcc2" if hot else "#d4d4d8") if light else ("#45454d" if hot else "#2c2c32"))
+            dr.rounded_rectangle((0, y0 * k, b * k - 1, (y0 + b) * k - 1), radius=6 * k, fill=fill)
+            ink = "#ffffff" if on or not light else "#202024"
+            cx, cy, lw = b / 2 * k, (y0 + b / 2) * k, max(2, round(b / 16 * k))
+            if t == "move":  # four arrows
+                L, hd = b * 0.32 * k, b * 0.13 * k
+                for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                    ex, ey = cx + dx * L, cy + dy * L
+                    dr.line((cx, cy, ex, ey), fill=ink, width=lw)
+                    px, py = -dy, dx
+                    dr.polygon([(ex + dx * hd * 0.2, ey + dy * hd * 0.2),
+                                (ex - dx * hd + px * hd * 0.8, ey - dy * hd + py * hd * 0.8),
+                                (ex - dx * hd - px * hd * 0.8, ey - dy * hd - py * hd * 0.8)], fill=ink)
+            else:  # a circle arrow
+                R = b * 0.28 * k
+                dr.arc((cx - R, cy - R, cx + R, cy + R), start=-60, end=230, fill=ink, width=lw)
+                ang = math.radians(-60)
+                ex, ey = cx + R * math.cos(ang), cy + R * math.sin(ang)
+                hd = b * 0.16 * k
+                # arrowhead pointing along the arc (clockwise in screen terms at its start)
+                tx, ty = -math.sin(ang), math.cos(ang)
+                dr.polygon([(ex - tx * hd, ey - ty * hd), (ex + ty * hd * 0.7 + tx * hd * 0.2, ey - tx * hd * 0.7 + ty * hd * 0.2),
+                            (ex - ty * hd * 0.7 + tx * hd * 0.2, ey + tx * hd * 0.7 + ty * hd * 0.2)], fill=ink)
+                dr.ellipse((cx - lw, cy - lw, cx + lw, cy + lw), fill=ink)
+        self._photo = ImageTk.PhotoImage(img.resize((b, h), Image.LANCZOS), master=self)
+        self.delete("all")
+        self.create_image(0, 0, image=self._photo, anchor="nw")
+
+
 def _mix(a, b, t):
     a, b = (tuple(int(h[i:i + 2], 16) for i in (1, 3, 5)) for h in (a, b))
     return "#%02x%02x%02x" % tuple(round(x + (y - x) * t) for x, y in zip(a, b))
@@ -1744,6 +1907,9 @@ class _ViewMixin:
         self._keys, self._key_rel_jobs, self._fly_job, self._fly_last = set(), {}, None, 0.0
         self.fly_speed = 1.0
         self.fly = False          # free fly: mouse turns the camera, W A S D Q E move it
+        self.on_bone_pick = None  # called with the bone index clicked in the view
+        self.on_pose = None       # called with the bone index after the move / rotate gizmo changed it
+        self._click = None
         self.on_fly = None        # called with True / False when free fly turns on / off
         self._mw = None
         self._center = None
@@ -1752,7 +1918,7 @@ class _ViewMixin:
         # Blender style: middle-drag orbit, Shift+middle-drag pan, wheel zoom (left-drag orbit and right-drag pan
         # too, for mice / touchpads without a usable middle button)
         self._mw = w
-        w.bind("<ButtonPress-1>", lambda e: self._press(e, "orbit"))
+        w.bind("<ButtonPress-1>", lambda e: self._press(e, "orbit", 1))
         w.bind("<ButtonPress-2>", lambda e: self._press(e, "orbit"))
         w.bind("<ButtonPress-3>", lambda e: self._press(e, "pan"))
         w.bind("<Shift-ButtonPress-1>", lambda e: self._press(e, "pan"))
@@ -1762,21 +1928,42 @@ class _ViewMixin:
         w.winfo_toplevel().bind("<ButtonPress-1>", lambda e: self.fly and self.set_fly(False), add="+")
         for b in (1, 2, 3):
             w.bind(f"<B{b}-Motion>", self._motion)
-            w.bind(f"<ButtonRelease-{b}>", lambda e: setattr(self, "_drag", None))
+            w.bind(f"<ButtonRelease-{b}>", self._release)
+        w.bind("<Motion>", self._hover_gizmo, add="+")
         # the mouse wheel is handled by the app (zoom / Shift: fly speed / Alt: field of view)
         w.bind("<Double-Button-1>", lambda e: self.frame())
 
-    def _press(self, e, kind):
+    def _press(self, e, kind, button=0):
         if self.fly:
             return
+        self._click = (e.x, e.y) if button == 1 else None
+        if button == 1 and self.r is not None:
+            hit = self._gizmo_hit(e.x, e.y)
+            if hit is not None:
+                self._drag = ("gizmo", e.x, e.y, hit)
+                self._click = None
+                return
         self._drag = (kind, e.x, e.y)
         try:
             e.widget.focus_set()
         except Exception:
             pass
 
+    def _release(self, e):
+        click, self._click = self._click, None
+        was = self._drag
+        self._drag = None
+        if click and abs(e.x - click[0]) + abs(e.y - click[1]) < 4 and was and was[0] == "orbit":
+            self._pick_bone(e.x, e.y)
+
     def _motion(self, e):
         if not self._drag or self.r is None:
+            return
+        if self._click and abs(e.x - self._click[0]) + abs(e.y - self._click[1]) < 4:
+            return  # still a click (picks a bone), not a drag yet
+        self._click = None
+        if self._drag[0] == "gizmo":
+            self._gizmo_drag(e)
             return
         kind, x, y = self._drag
         dx, dy = e.x - x, e.y - y
@@ -1786,6 +1973,133 @@ class _ViewMixin:
             self.r.cam.pan(dx, dy, self._size()[1])
         self._drag = (kind, e.x, e.y)
         self.request()
+
+    # ---------------------------------------------------------- bones: pick, move / rotate gizmo
+    def set_tool(self, tool):
+        if self.r is None:
+            return
+        self.r.opts["tool"] = tool
+        self.r.opts["gizmo_hover"] = None
+        self.request()
+
+    def _project(self, pts):
+        """Screen pixels (x, y) of world points; None where behind the camera."""
+        w, h = self._size()
+        vp = self.r.cam.matrices(w, h)
+        p = np.asarray(pts, np.float64).reshape(-1, 3)
+        c = np.hstack([p, np.ones((len(p), 1))]) @ vp.T
+        out = []
+        for x, y, _z, q in c:
+            out.append(None if q <= 1e-9 else ((x / q * 0.5 + 0.5) * w, (0.5 - y / q * 0.5) * h))
+        return out
+
+    @staticmethod
+    def _seg_dist(px, py, a, b):
+        ax, ay = a
+        bx, by = b
+        dx, dy = bx - ax, by - ay
+        t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / max(dx * dx + dy * dy, 1e-9)))
+        return math.hypot(px - ax - t * dx, py - ay - t * dy)
+
+    def _gizmo_hit(self, x, y, tol=9.0):
+        g = self.r.gizmo_frame() if self.r is not None else None
+        if g is None:
+            return None
+        head, axes, L = g
+        best = (tol, None)
+        for a in range(3):
+            if self.r.opts["tool"] == "move":
+                (p0, p1) = self._project([head, head + axes[:, a] * L])
+                if p0 is None or p1 is None:
+                    continue
+                d = self._seg_dist(x, y, p0, p1)
+                if math.hypot(x - p0[0], y - p0[1]) < 6:  # the centre belongs to no axis
+                    continue
+            else:
+                ring = self._project(self.r.gizmo_ring(head, axes, L, a))
+                d = min((self._seg_dist(x, y, p, q) for p, q in zip(ring, ring[1:]) if p and q), default=1e9)
+            if d < best[0]:
+                best = (d, a)
+        return best[1]
+
+    def _hover_gizmo(self, e):
+        if self.r is None or self.fly or self._drag or self.r.opts.get("tool") is None:
+            return
+        hit = self._gizmo_hit(e.x, e.y)
+        if hit != self.r.opts.get("gizmo_hover"):
+            self.r.opts["gizmo_hover"] = hit
+            self.request()
+
+    def _pick_bone(self, x, y):
+        r = self.r
+        if r is None or r.model is None or not r.model.joints or not r.opts.get("skeleton"):
+            return
+        m = r.model
+        pos = self._project(r.bone_positions())
+        jindex = {jn: k for k, jn in enumerate(m.joints)}
+        best = (12.0, None)
+        for k, p in enumerate(pos):  # joints first (the bone's head)
+            if p is not None and math.hypot(x - p[0], y - p[1]) < best[0]:
+                best = (math.hypot(x - p[0], y - p[1]), k)
+        if best[1] is None:
+            best = (7.0, None)
+            for k, jn in enumerate(m.joints):  # then the line from the parent
+                par = jindex.get(m.nodes[jn]["parent"])
+                if par is None or pos[k] is None or pos[par] is None:
+                    continue
+                d = self._seg_dist(x, y, pos[par], pos[k])
+                if d < best[0]:
+                    best = (d, k)
+        if best[1] is not None and self.on_bone_pick:
+            self.on_bone_pick(best[1])
+
+    def _gizmo_drag(self, e):
+        kind, x0, y0, a = self._drag
+        r = self.r
+        g = r.gizmo_frame()
+        if g is None:
+            return
+        head, axes, L = g
+        m = r.model
+        k = r.opts["bone"]
+        jn = m.joints[k]
+        pz = list(r.opts["pose"].get(jn, (0.0, 0.0, 0.0)))
+        pz += [0.0] * (6 - len(pz))
+        u = axes[:, a]
+        p0, p1 = self._project([head, head + u * L])
+        if p0 is None or p1 is None:
+            return
+        if r.opts["tool"] == "move":
+            sx, sy = p1[0] - p0[0], p1[1] - p0[1]
+            ln = math.hypot(sx, sy)
+            if ln < 4:
+                return
+            px = ((e.x - x0) * sx + (e.y - y0) * sy) / ln
+            dw = u * (px * L / ln)
+            par = m.nodes[jn]["parent"]
+            plin = r.world[par][:3, :3] if par is not None and par >= 0 else np.identity(3)
+            rrest = quat_mat(m.nodes[jn]["r"])[:3, :3]
+            dt = rrest.T @ np.linalg.solve(plin, dw)
+            pz[3:6] = [pz[3] + dt[0], pz[4] + dt[1], pz[5] + dt[2]]
+        else:
+            t0 = math.atan2(-(y0 - p0[1]), x0 - p0[0])
+            t1 = math.atan2(-(e.y - p0[1]), e.x - p0[0])
+            d = (t1 - t0 + math.pi) % (2 * math.pi) - math.pi
+            toward = float(u @ (r.cam.eye() - head)) > 0
+            ang = [0.0, 0.0, 0.0]
+            ang[a] = math.degrees(d if toward else -d)
+            e_new = euler_mat(*pz[:3]) @ euler_mat(*ang)
+            pz[:3] = mat_euler(e_new)
+        self._drag = (kind, e.x, e.y, a)
+        if any(abs(v) > 1e-9 for v in pz):
+            r.opts["pose"][jn] = tuple(pz)
+        else:
+            r.opts["pose"].pop(jn, None)
+        self._make_current()
+        r.update_pose()
+        self.request()
+        if self.on_pose:
+            self.on_pose(k)
 
     def _wheel(self, steps):
         if self.r is None:
@@ -1961,8 +2275,10 @@ class _ViewMixin:
     def set_pose(self, bone_k, angles):
         m = self.r.model
         jn = m.joints[bone_k]
-        if any(angles):
-            self.r.opts["pose"][jn] = tuple(angles)
+        move = tuple(self.r.opts["pose"].get(jn, ())[3:6])
+        pz = tuple(angles) + move
+        if any(pz):
+            self.r.opts["pose"][jn] = pz
         else:
             self.r.opts["pose"].pop(jn, None)
         self._make_current()
@@ -1998,6 +2314,9 @@ class _ViewMixin:
         g = getattr(self, "gizmo", None)
         if g is not None:
             g.request()
+        tb = getattr(self, "toolbar", None)
+        if tb is not None and tb.drawn_bg != NavGizmo._bg(self):  # (it only changes with the background)
+            tb.request()
 
     def snap_to(self, back, ms=220):
         """Turn the camera (around the point it looks at) so it looks from direction `back`, animated."""

@@ -65,6 +65,7 @@ Open it with **View 3D** on an extraction or **Preview** in the catalog. The **C
 | Free fly | move the mouse to look, **W A S D** move, **Q** down, **E** up, wheel forward/back |
 | Fly speed | **Shift + mouse wheel** |
 | Field of view | **Alt + mouse wheel** |
+| Pose a bone | **G** (move) or **R** (rotate), or the buttons on the left of the view; click a bone, then drag an arrow or a ring. Rotation follows the bone's own X / Y / Z. |
 
 - **Model → All parts together** shows every mesh in the list at once (damaged / alternate versions left out), e.g. a boss built from many parts. In the catalog, bosses have **Preview whole vehicle**.
 - **Aircraft panel** (top right of the view): pick a **Livery** and attach the **Gear**, **Probe** and **Pylons**.
