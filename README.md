@@ -67,7 +67,7 @@ button (bottom right of the view) lists all of these.
 | Fly speed | **Shift + mouse wheel** |
 | Field of view | **Alt + mouse wheel** |
 | Pick a bone | click it in the view (with **Skeleton** on), or in the **Bones** list |
-| Translate / rotate a bone | **G** / **R** (or the buttons on the left of the view), then drag an arrow / a ring. Rotation uses the bone's own X / Y / Z |
+| Translate / rotate a bone | **G** / **R** (or the two buttons at the top left of the view, beside the Aircraft panel), then drag an arrow / a ring. Rotation uses the bone's own X / Y / Z |
 | Exact bone values | **Bones** panel: type the Translation / Rotation numbers (or scroll over them); Rotation also has sliders |
 | Reset a bone | **Alt + G** / **Alt + R**, or **Reset translation** / **Reset rotation** (Bones panel) |
 | Look at the selected bone | **.** (period) |

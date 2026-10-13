@@ -1897,14 +1897,16 @@ class ToolBar(_Overlay):
 
     TOOLS = (("move", "Translate bone  (G)"), ("rotate", "Rotate bone  (R)"))
 
-    def __init__(self, view, size=34, on_change=None, on_hint=None):
+    def __init__(self, view, size=34, on_change=None, on_hint=None, anchor=None):
         self.bs, self.gap = size, 3
+        self.anchor = anchor  # () -> (x, y) top-left in the view, or None for the default place
         _Overlay.__init__(self, view, size, len(self.TOOLS) * size + (len(self.TOOLS) - 1) * self.gap)
         self.on_change, self.on_hint = on_change, on_hint
         self.active, self._hover = None, None
 
     def pos(self, vw, vh):
-        return 8, (vh - self.h) // 2
+        p = self.anchor() if self.anchor else None
+        return p if p else (8, (vh - self.h) // 2)
 
     def _at(self, y):
         i = int(y // (self.bs + self.gap))

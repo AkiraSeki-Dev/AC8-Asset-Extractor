@@ -3316,7 +3316,9 @@ class App(tk.Tk):
                                          on_frame=lambda: self.glv and self.glv.frame(), on_hint=self._view_hint)
         # left side of the view: move / rotate bone tools (G / R)
         self.view_tools = ac8_glview.ToolBar(self.glv, size=round(32 * SCALE), on_change=self._view_tool_changed,
-                                             on_hint=self._view_hint)
+                                             on_hint=self._view_hint, anchor=self._view_tools_anchor)
+        # the aircraft panel grows (livery editor): keep the tool buttons beside it
+        self.view_aircraft.bind("<Configure>", lambda e: self.glv and self.glv.request(), add="+")
         self.glv.on_bone_pick = self._view_pick_bone
         self.glv.on_pose = self._view_pose_changed
         # bottom right of the view: the list of controls
@@ -4004,6 +4006,18 @@ class App(tk.Tk):
         self.v_bone[i].set(f"{v + (step if up else -step):.4f}")
         self._view_bone_field(i)
         return "break"
+
+    def _view_tools_anchor(self):
+        """Translate / rotate buttons: just right of the aircraft panel when it's showing (so the livery editor
+        never covers them), else the default place on the left."""
+        ov = self.view_aircraft
+        try:
+            if not ov.winfo_ismapped():
+                return None
+            return (ov.winfo_rootx() - self.glv.winfo_rootx() + ov.winfo_width() + 8,
+                    ov.winfo_rooty() - self.glv.winfo_rooty())
+        except tk.TclError:
+            return None
 
     def _view_tool_changed(self, tool):
         m = self._view_model
