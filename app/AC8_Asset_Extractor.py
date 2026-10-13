@@ -3301,9 +3301,9 @@ class App(tk.Tk):
     def _view_fail(self, why):
         self._glv_failed = why
         if getattr(self, "gizmo", None) is not None:
-            self.gizmo.place_forget()
+            self.gizmo.show(False)
             self.view_controls_btn.place_forget()
-            self.view_tools.place_forget()
+            self.view_tools.show(False)
         if self.glv is not None:
             try:
                 self.glv.pack_forget()
@@ -3606,8 +3606,8 @@ class App(tk.Tk):
         self.view_placeholder.place_forget()
         if not self.glv.winfo_ismapped():
             self.glv.pack(fill="both", expand=True)
-        if getattr(self, "gizmo", None) is not None and not self.gizmo.winfo_ismapped():
-            self.gizmo.place_in(relx=1.0, x=-8, y=8, anchor="ne")
+        if getattr(self, "gizmo", None) is not None and not self.gizmo.visible:
+            self.gizmo.show(True)
             self.view_controls_btn.place(relx=1.0, rely=1.0, x=-8, y=-8, anchor="se")
             self.view_controls_btn.lift()
         self._view_model, self._view_stats = model, stats
@@ -3617,10 +3617,10 @@ class App(tk.Tk):
         self._fill_view_bones()
         if getattr(self, "view_tools", None) is not None:
             if model.joints:
-                self.view_tools.place_in(x=8, rely=0.5, anchor="w")
+                self.view_tools.show(True)
             else:
                 self.view_tools.set_active(None)
-                self.view_tools.place_forget()
+                self.view_tools.show(False)
         self._fill_view_info()
         n = len(self._view_files)
         lv = self._view_livery_entry()
@@ -3914,7 +3914,7 @@ class App(tk.Tk):
                 self.v_view_skel.set(True)
                 self._view_apply()
             tools = getattr(self, "view_tools", None)
-            if tools is not None and tools.active is None and tools.winfo_ismapped():
+            if tools is not None and tools.active is None and tools.visible:
                 # a picked bone gets a gizmo straight away: Move the first time, then whichever tool was used last
                 tools.set_active(getattr(self, "_last_bone_tool", "move"))
             self.glv.request()
@@ -4245,7 +4245,7 @@ class App(tk.Tk):
         if self.glv.key_down(e.keysym):  # free fly: W A S D Q E (Shift faster)
             return "break"
         if ks in ("g", "r") and not ctrl and getattr(self, "view_tools", None) is not None \
-                and self.view_tools.winfo_ismapped():  # bone tools: G move, R rotate (again: put it away)
+                and self.view_tools.visible:  # bone tools: G move, R rotate (again: put it away)
             t = "move" if ks == "g" else "rotate"
             self.view_tools.set_active(None if self.view_tools.active == t else t)
             return "break"

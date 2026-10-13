@@ -909,6 +909,23 @@ out vec4 oColor;
 void main() { oColor = vCol; }
 """
 
+OVL_VERT = """
+#version 330
+layout(location=0) in vec2 aPos;
+layout(location=1) in vec2 aUV;
+uniform vec2 uView;
+out vec2 vUV;
+void main() { vUV = aUV; gl_Position = vec4(aPos.x / uView.x * 2.0 - 1.0, 1.0 - aPos.y / uView.y * 2.0, 0.0, 1.0); }
+"""
+
+OVL_FRAG = """
+#version 330
+in vec2 vUV;
+uniform sampler2D tImg;
+out vec4 oColor;
+void main() { oColor = texture(tImg, vUV); }
+"""
+
 BACKGROUNDS = {"dark": (0.047, 0.047, 0.055), "grey": (0.22, 0.22, 0.24), "light": (0.78, 0.78, 0.8)}
 ORANGE = (0.90, 0.24, 0.18)
 
@@ -1029,6 +1046,9 @@ class Renderer:
         self.renderer_name = GL.glGetString(GL.GL_RENDERER).decode(errors="replace")
         self.prog = self._compile(VERT, FRAG)
         self.line_prog = self._compile(LINE_VERT, LINE_FRAG)
+        self.ovl_prog = self._compile(OVL_VERT, OVL_FRAG)
+        self.ovl_vao, self.ovl_vbo = GL.glGenVertexArrays(1), GL.glGenBuffers(1)
+        self.overlays, self._ovl_tex = [], {}  # [(key, RGBA (h, w, 4) uint8, x, y)] drawn on top, pixels
         self.u = {n: GL.glGetUniformLocation(self.prog, n) for n in (
             "uVP", "uModel", "uSkin", "uBones", "uMode", "uFlat", "uBase", "uMetal", "uRough", "uHasBase", "uHasNrm",
             "uHasMR", "uHasOcc", "tBase", "tNrm", "tMR", "uAlpha", "uCutoff", "uEye", "uKey", "uFill", "uShow", "uHasMask", "tMask",
@@ -1307,6 +1327,47 @@ class Renderer:
         GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
         self.fbo_size = (w, h)
 
+    def _draw_overlays(self, w, h):
+        GL = self.GL
+        if not self.overlays:
+            return
+        import ctypes
+        GL.glUseProgram(self.ovl_prog)
+        GL.glUniform2f(GL.glGetUniformLocation(self.ovl_prog, "uView"), float(w), float(h))
+        GL.glUniform1i(GL.glGetUniformLocation(self.ovl_prog, "tImg"), 0)
+        GL.glDisable(GL.GL_DEPTH_TEST)
+        GL.glEnable(GL.GL_BLEND)
+        GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
+        GL.glBindVertexArray(self.ovl_vao)
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self.ovl_vbo)
+        GL.glActiveTexture(GL.GL_TEXTURE0)
+        for key, img, x, y in self.overlays:
+            ih, iw = img.shape[:2]
+            tex, src = self._ovl_tex.get(key, (None, None))
+            if tex is None:
+                tex = GL.glGenTextures(1)
+            GL.glBindTexture(GL.GL_TEXTURE_2D, tex)
+            if src is not img:  # a new picture: upload it
+                GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_NEAREST)
+                GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_NEAREST)
+                GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL.GL_CLAMP_TO_EDGE)
+                GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL.GL_CLAMP_TO_EDGE)
+                GL.glPixelStorei(GL.GL_UNPACK_ALIGNMENT, 1)
+                GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_RGBA8, iw, ih, 0, GL.GL_RGBA, GL.GL_UNSIGNED_BYTE,
+                                np.ascontiguousarray(img))
+            self._ovl_tex[key] = (tex, img)
+            q = np.array([[x, y, 0, 0], [x + iw, y, 1, 0], [x, y + ih, 0, 1],
+                          [x + iw, y, 1, 0], [x + iw, y + ih, 1, 1], [x, y + ih, 0, 1]], np.float32)
+            GL.glBufferData(GL.GL_ARRAY_BUFFER, q.nbytes, q, GL.GL_DYNAMIC_DRAW)
+            GL.glEnableVertexAttribArray(0)
+            GL.glVertexAttribPointer(0, 2, GL.GL_FLOAT, GL.GL_FALSE, 16, None)
+            GL.glEnableVertexAttribArray(1)
+            GL.glVertexAttribPointer(1, 2, GL.GL_FLOAT, GL.GL_FALSE, 16, ctypes.c_void_p(8))
+            GL.glDrawArrays(GL.GL_TRIANGLES, 0, 6)
+        GL.glBindVertexArray(0)
+        GL.glDisable(GL.GL_BLEND)
+        GL.glEnable(GL.GL_DEPTH_TEST)
+
     def render(self, w, h, target_fbo=0):
         """Draw a frame (multisampled) and resolve it into target_fbo (0 = the window, None = don't resolve)."""
         GL = self.GL
@@ -1327,6 +1388,7 @@ class Renderer:
             if self.opts["skeleton"] and self.model.joints:
                 self._draw_skeleton(vp)
             self._draw_bone_gizmo(vp)
+        self._draw_overlays(w, h)
         # resolve the multisampled image into a plain buffer of the same format
         GL.glBindFramebuffer(GL.GL_READ_FRAMEBUFFER, self.fbo)
         GL.glBindFramebuffer(GL.GL_DRAW_FRAMEBUFFER, self.resolve)
@@ -1613,48 +1675,79 @@ def GLView(parent, bg="#0c0c0e", on_error=None, on_ready=None):
     return _make_window_view(parent, bg, on_error, on_ready)
 
 
-class NavGizmo(tk.Canvas):
-    """Blender's navigation gizmo for a GLView: the X / Y / Z axes as seen from the camera. Click a ball to look
-    along that axis, drag the circle to orbit. Labelled like Blender (Z up), which is how the exported GLBs open
-    there: Blender X = glTF +X, Blender Y = glTF -Z, Blender Z = glTF +Y."""
+class _Overlay:
+    """A control drawn inside the 3D view itself (so it can be see-through, like Blender's), from a Pillow RGBA
+    image. The view sends it the mouse when the pointer is over it (local coordinates)."""
+
+    SS = 4  # drawn this many times larger, then scaled down: smooth (anti-aliased) edges
+
+    def __init__(self, view, w, h):
+        self.view, self.w, self.h = view, w, h
+        self.visible, self._img, self._dirty = False, None, True
+        view.overlays.append(self)
+
+    def show(self, on=True):
+        if bool(on) != self.visible:
+            self.visible = bool(on)
+            if not on:
+                self.leave()
+            self.view.request()
+
+    def invalidate(self):
+        self._dirty = True
+        self.view.request()
+
+    def image(self):
+        if self._dirty or self._img is None:
+            self._dirty = False
+            from PIL import Image
+            big = self.render()
+            self._img = np.asarray(big.resize((self.w, self.h), Image.LANCZOS), np.uint8)
+        return self._img
+
+    def contains(self, x, y):
+        return 0 <= x < self.w and 0 <= y < self.h
+
+    def pos(self, vw, vh):
+        return 0, 0
+
+    def light(self):
+        r = self.view.r
+        return r is not None and r.opts.get("bg") == "light"
+
+    # mouse (local coordinates); return a cursor name from motion
+    def motion(self, x, y):
+        return ""
+
+    def leave(self):
+        pass
+
+    def press(self, x, y):
+        pass
+
+    def drag(self, x, y):
+        pass
+
+    def release(self, x, y):
+        pass
+
+
+class NavGizmo(_Overlay):
+    """Blender's navigation gizmo: the X / Y / Z axes as seen from the camera. Click a ball to look along that
+    axis, drag the circle to orbit. Labelled like Blender (Z up), which is how the exported GLBs open there:
+    Blender X = glTF +X, Blender Y = glTF -Z, Blender Z = glTF +Y. Under it: a round "frame the model" button."""
 
     AXES = (("X", (1.0, 0.0, 0.0), "#ff3352"), ("Y", (0.0, 0.0, -1.0), "#8bdc00"), ("Z", (0.0, 1.0, 0.0), "#2890ff"))
 
     def __init__(self, view, size=96, font_file=None, on_frame=None, on_hint=None):
-        # under the circle: a round "frame the model" button
-        self.btn, self.gap = round(size * 0.36), round(size * 0.1)
-        self.height = size + (self.gap + self.btn if on_frame else 0)
-        tk.Canvas.__init__(self, view.master, width=size, height=self.height, highlightthickness=0, bd=0,
-                           bg=self._bg(view), cursor="hand2")
-        self.view, self.size = view, size
+        self.size, self.btn, self.gap = size, round(size * 0.36), round(size * 0.1)
+        _Overlay.__init__(self, view, size, size + (self.gap + self.btn if on_frame else 0))
         self.font_file, self.on_frame, self.on_hint = font_file, on_frame, on_hint
-        self._job, self._hover, self._press, self._balls = None, None, None, []
+        self._hover, self._press, self._balls = None, None, []
         view.gizmo = self
-        self.bind("<Motion>", self._motion)
-        self.bind("<Leave>", lambda e: (self._set_hover(None), self.on_hint and self.on_hint(None)))
-        self.bind("<ButtonPress-1>", self._down)
-        self.bind("<B1-Motion>", self._drag)
-        self.bind("<ButtonRelease-1>", self._up)
-        self.request()
 
-    @staticmethod
-    def _bg(view):
-        r = getattr(view, "r", None)
-        c = BACKGROUNDS.get(r.opts.get("bg", "dark") if r else "dark", BACKGROUNDS["dark"])
-        return "#%02x%02x%02x" % tuple(round(v * 255) for v in c)
-
-    def place_in(self, **kw):
-        self.place(**kw)
-        self.tk.call("raise", self._w)  # (Canvas.lift raises canvas items, not the widget)
-
-    def request(self):
-        if self._job is None:
-            try:
-                self._job = self.after_idle(self.draw)
-            except tk.TclError:
-                pass
-
-    SS = 4  # drawn this many times larger, then scaled down: smooth (anti-aliased) edges
+    def pos(self, vw, vh):
+        return vw - self.w - 8, 8
 
     def _pil_font(self, px):
         from PIL import ImageFont
@@ -1677,32 +1770,27 @@ class NavGizmo(tk.Canvas):
             cache[key] = f
         return cache[key]
 
-    def draw(self):
-        self._job = None
+    def render(self):
+        from PIL import Image, ImageDraw
         v = self.view
-        if v.r is None:
-            return
-        from PIL import Image, ImageDraw, ImageTk
-        light = v.r.opts.get("bg") == "light"
-        bg = self._bg(v)
-        self.configure(bg=bg)
         s, k = self.size, self.SS
         c, R, br = s / 2, s / 2 - s * 0.13, s * 0.105
-        img = Image.new("RGB", (s * k, self.height * k), bg)
+        img = Image.new("RGBA", (s * k, self.h * k), (0, 0, 0, 0))
         dr = ImageDraw.Draw(img)
+        light = self.light()
 
         def oval(x, y, r, fill=None, outline=None, width=0):
             dr.ellipse((x * k - r * k, y * k - r * k, x * k + r * k, y * k + r * k), fill=fill, outline=outline,
                        width=round(width * k))
 
         if (self._hover is not None and self._hover[0] != "frame") or self._press is not None:
-            oval(c, c, s / 2 - 0.5, fill="#c8c8cc" if light else "#3a3a40")
+            oval(c, c, s / 2 - 0.5, fill=(255, 255, 255, 46) if not light else (0, 0, 0, 40))
         if self.on_frame:  # frame button: corner brackets around a dot
             hot = self._hover is not None and self._hover[0] == "frame"
             fy, b = s + self.gap + self.btn / 2, self.btn
             fx = s - b / 2 - 0.5  # right-aligned with the circle above
-            oval(fx, fy, b / 2 - 0.5, fill=("#b4b4ba" if hot else "#d4d4d8") if light else ("#4a4a52" if hot else "#2c2c32"))
-            ink = "#202024" if light else "#e8e8ec"
+            oval(fx, fy, b / 2 - 0.5, fill=(70, 70, 76, 200) if hot else (40, 40, 44, 150))
+            ink = (232, 232, 236, 255)
             h, L, lw = b * 0.24, b * 0.11, max(1.4, b / 18) * k
             for sx in (-1, 1):
                 for sy in (-1, 1):
@@ -1710,32 +1798,31 @@ class NavGizmo(tk.Canvas):
                     dr.line((x0, y0, x0 - sx * L * k, y0), fill=ink, width=round(lw))
                     dr.line((x0, y0, x0, y0 - sy * L * k), fill=ink, width=round(lw))
             oval(fx, fy, b * 0.07, fill=ink)
-        view_m = look_at(v.r.cam.eye(), v.r.cam.target)
-        right, up, toward = view_m[0, :3], view_m[1, :3], view_m[2, :3]
-        balls = []
-        for name, d, col in self.AXES:
-            for sign in (1, -1):
-                w = np.array(d) * sign
-                x, y = c + R * float(w @ right), c - R * float(w @ up)
-                balls.append((float(w @ toward), sign, name, col, x, y, tuple(w)))
-        balls.sort(key=lambda b: b[0])  # far side first
-        font = self._pil_font(br * 1.25 * k)
-        self._balls = []
-        for depth, sign, name, col, x, y, w in balls:
-            hot = self._hover == (name, sign)
-            if sign > 0:
-                dr.line((c * k, c * k, x * k, y * k), fill=col, width=round(max(2.0, s / 40) * k))
-                oval(x, y, br, fill="#ffffff" if hot else col)
-                dr.text((x * k, y * k), name, font=font, fill=col if hot else "#101014", anchor="mm")
-            else:
-                fill = _mix(col, "#ffffff" if light else "#000000", 0.55)
-                oval(x, y, br, fill=col if hot else fill, outline=col, width=max(1.2, s / 64))
-                if hot:
-                    dr.text((x * k, y * k), "-" + name, font=font, fill="#101014", anchor="mm")
-            self._balls.append((x, y, br, name, sign, w))
-        self._photo = ImageTk.PhotoImage(img.resize((s, self.height), Image.LANCZOS), master=self)
-        self.delete("all")
-        self.create_image(0, 0, image=self._photo, anchor="nw")
+        if v.r is not None:
+            view_m = look_at(v.r.cam.eye(), v.r.cam.target)
+            right, up, toward = view_m[0, :3], view_m[1, :3], view_m[2, :3]
+            balls = []
+            for name, d, col in self.AXES:
+                for sign in (1, -1):
+                    w = np.array(d) * sign
+                    x, y = c + R * float(w @ right), c - R * float(w @ up)
+                    balls.append((float(w @ toward), sign, name, col, x, y, tuple(w)))
+            balls.sort(key=lambda b: b[0])  # far side first
+            font = self._pil_font(br * 1.25 * k)
+            self._balls = []
+            for depth, sign, name, col, x, y, w in balls:
+                hot = self._hover == (name, sign)
+                if sign > 0:
+                    dr.line((c * k, c * k, x * k, y * k), fill=col, width=round(max(2.0, s / 40) * k))
+                    oval(x, y, br, fill="#ffffff" if hot else col)
+                    dr.text((x * k, y * k), name, font=font, fill=col if hot else "#101014", anchor="mm")
+                else:
+                    oval(x, y, br, fill=col if hot else _mix(col, "#000000", 0.55), outline=col,
+                         width=max(1.2, s / 64))
+                    if hot:
+                        dr.text((x * k, y * k), "-" + name, font=font, fill="#101014", anchor="mm")
+                self._balls.append((x, y, br, name, sign, w))
+        return img
 
     def _hit(self, x, y):
         if self.on_frame and (x - self.size + self.btn / 2) ** 2 + (y - self.size - self.gap - self.btn / 2) ** 2 <= \
@@ -1749,120 +1836,112 @@ class NavGizmo(tk.Canvas):
     def _inside(self, x, y):
         return (x - self.size / 2) ** 2 + (y - self.size / 2) ** 2 <= (self.size / 2) ** 2
 
+    def contains(self, x, y):
+        return self._inside(x, y) or self._hit(x, y) is not None
+
     def _set_hover(self, h):
         if h != self._hover:
+            if self.on_hint and (h and h[0] == "frame") != (self._hover and self._hover[0] == "frame"):
+                self.on_hint("Frame the model  (F)" if h and h[0] == "frame" else None)
             self._hover = h
-            self.request()
+            self.invalidate()
 
-    def _motion(self, e):
-        hit = self._hit(e.x, e.y)
-        h = hit[:2] if hit else ("ring", 0) if self._inside(e.x, e.y) else None
-        if h != self._hover and self.on_hint:
-            self.on_hint("Frame the model  (F)" if h and h[0] == "frame" else None)
-        self._set_hover(h)
-        self.configure(cursor="hand2" if hit else "fleur" if self._inside(e.x, e.y) else "")
+    def motion(self, x, y):
+        hit = self._hit(x, y)
+        self._set_hover(hit[:2] if hit else ("ring", 0) if self._inside(x, y) else None)
+        return "hand2" if hit else "fleur" if self._inside(x, y) else ""
 
-    def _down(self, e):
-        hit = self._hit(e.x, e.y)
+    def leave(self):
+        self._set_hover(None)
+
+    def press(self, x, y):
+        hit = self._hit(x, y)
         if hit and hit[0] == "frame":
             self._press = None
             self.on_frame()
             return
-        self._press = (e.x, e.y, e.x, e.y, False)
+        self._press = (x, y, x, y, False)
 
-    def _drag(self, e):
+    def drag(self, x, y):
         if self._press is None or self.view.r is None:
             return
         x0, y0, lx, ly, moved = self._press
-        if not moved and abs(e.x - x0) + abs(e.y - y0) < 3:
+        if not moved and abs(x - x0) + abs(y - y0) < 3:
             return
         self.view.set_fly(False)
-        self.view.r.cam.orbit(e.x - lx, e.y - ly)
+        self.view.r.cam.orbit(x - lx, y - ly)
         self.view.request()
-        self._press = (x0, y0, e.x, e.y, True)
+        self._press = (x0, y0, x, y, True)
 
-    def _up(self, e):
+    def release(self, x, y):
         p, self._press = self._press, None
         if p and not p[4]:
-            hit = self._hit(e.x, e.y)
+            hit = self._hit(x, y)
             if hit and hit[0] != "frame":
                 self.view.snap_to(hit[2])
-        self.request()
+        self.invalidate()
 
 
-class ToolBar(tk.Canvas):
+class ToolBar(_Overlay):
     """Blender-style tool buttons for the bone gizmo, stacked: move (G) and rotate (R). Click one to use it, click
     it again to put it away."""
 
     TOOLS = (("move", "Move bone  (G)"), ("rotate", "Rotate bone  (R)"))
-    SS = 4
 
     def __init__(self, view, size=34, on_change=None, on_hint=None):
         self.bs, self.gap = size, 3
-        h = len(self.TOOLS) * size + (len(self.TOOLS) - 1) * self.gap
-        tk.Canvas.__init__(self, view.master, width=size, height=h, highlightthickness=0, bd=0,
-                           bg=NavGizmo._bg(view), cursor="hand2")
-        self.view, self.on_change, self.on_hint = view, on_change, on_hint
-        self.active, self._hover, self._photo, self._job, self.drawn_bg = None, None, None, None, None
+        _Overlay.__init__(self, view, size, len(self.TOOLS) * size + (len(self.TOOLS) - 1) * self.gap)
+        self.on_change, self.on_hint = on_change, on_hint
+        self.active, self._hover = None, None
         view.toolbar = self
-        self.bind("<Motion>", self._motion)
-        self.bind("<Leave>", lambda e: self._set_hover(None))
-        self.bind("<ButtonPress-1>", self._click)
-        self.request()
 
-    def request(self):
-        if self._job is None:
-            try:
-                self._job = self.after_idle(self.draw)
-            except tk.TclError:
-                pass
-
-    def place_in(self, **kw):
-        self.place(**kw)
-        self.tk.call("raise", self._w)
+    def pos(self, vw, vh):
+        return 8, (vh - self.h) // 2
 
     def _at(self, y):
         i = int(y // (self.bs + self.gap))
         return self.TOOLS[i][0] if 0 <= i < len(self.TOOLS) and y - i * (self.bs + self.gap) <= self.bs else None
+
+    def contains(self, x, y):
+        return 0 <= x < self.w and self._at(y) is not None
 
     def _set_hover(self, t):
         if t != self._hover:
             self._hover = t
             if self.on_hint:
                 self.on_hint(dict(self.TOOLS).get(t) if t else None)
-            self.request()
+            self.invalidate()
 
-    def _motion(self, e):
-        self._set_hover(self._at(e.y))
+    def motion(self, x, y):
+        self._set_hover(self._at(y))
+        return "hand2"
 
-    def _click(self, e):
-        t = self._at(e.y)
+    def leave(self):
+        self._set_hover(None)
+
+    def press(self, x, y):
+        t = self._at(y)
         if t:
             self.set_active(None if t == self.active else t)
 
     def set_active(self, tool):
         self.active = tool
         self.view.set_tool(tool)
-        self.request()
+        self.invalidate()
         if self.on_change:
             self.on_change(tool)
 
-    def draw(self):
-        self._job = None
-        from PIL import Image, ImageDraw, ImageTk
-        v, k, b = self.view, self.SS, self.bs
-        bg = self.drawn_bg = NavGizmo._bg(v)
-        self.configure(bg=bg)
-        light = v.r is not None and v.r.opts.get("bg") == "light"
-        h = int(self["height"])
-        img = Image.new("RGB", (b * k, h * k), bg)
+    def render(self):
+        from PIL import Image, ImageDraw
+        k, b = self.SS, self.bs
+        img = Image.new("RGBA", (b * k, self.h * k), (0, 0, 0, 0))
         dr = ImageDraw.Draw(img)
         for i, (t, _tip) in enumerate(self.TOOLS):
             y0 = i * (b + self.gap)
             on, hot = t == self.active, t == self._hover
-            fill = "#4772b3" if on else (("#bcbcc2" if hot else "#d4d4d8") if light else ("#45454d" if hot else "#2c2c32"))
+            fill = (71, 114, 179, 235) if on else ((70, 70, 76, 210) if hot else (40, 40, 44, 160))
             dr.rounded_rectangle((0, y0 * k, b * k - 1, (y0 + b) * k - 1), radius=6 * k, fill=fill)
-            ink = "#ffffff" if on or not light else "#202024"
+            ink = (255, 255, 255, 255)
             cx, cy, lw = b / 2 * k, (y0 + b / 2) * k, max(2, round(b / 16 * k))
             if t == "move":  # four arrows
                 L, hd = b * 0.32 * k, b * 0.13 * k
@@ -1879,14 +1958,12 @@ class ToolBar(tk.Canvas):
                 ang = math.radians(-60)
                 ex, ey = cx + R * math.cos(ang), cy + R * math.sin(ang)
                 hd = b * 0.16 * k
-                # arrowhead pointing along the arc (clockwise in screen terms at its start)
                 tx, ty = -math.sin(ang), math.cos(ang)
-                dr.polygon([(ex - tx * hd, ey - ty * hd), (ex + ty * hd * 0.7 + tx * hd * 0.2, ey - tx * hd * 0.7 + ty * hd * 0.2),
+                dr.polygon([(ex - tx * hd, ey - ty * hd),
+                            (ex + ty * hd * 0.7 + tx * hd * 0.2, ey - tx * hd * 0.7 + ty * hd * 0.2),
                             (ex - ty * hd * 0.7 + tx * hd * 0.2, ey + tx * hd * 0.7 + ty * hd * 0.2)], fill=ink)
                 dr.ellipse((cx - lw, cy - lw, cx + lw, cy + lw), fill=ink)
-        self._photo = ImageTk.PhotoImage(img.resize((b, h), Image.LANCZOS), master=self)
-        self.delete("all")
-        self.create_image(0, 0, image=self._photo, anchor="nw")
+        return img
 
 
 def _mix(a, b, t):
@@ -1907,6 +1984,7 @@ class _ViewMixin:
         self._keys, self._key_rel_jobs, self._fly_job, self._fly_last = set(), {}, None, 0.0
         self.fly_speed = 1.0
         self.fly = False          # free fly: mouse turns the camera, W A S D Q E move it
+        self.overlays, self._ovl_grab, self._ovl_hover = [], None, None
         self.on_bone_pick = None  # called with the bone index clicked in the view
         self.on_pose = None       # called with the bone index after the move / rotate gizmo changed it
         self._click = None
@@ -1930,11 +2008,48 @@ class _ViewMixin:
             w.bind(f"<B{b}-Motion>", self._motion)
             w.bind(f"<ButtonRelease-{b}>", self._release)
         w.bind("<Motion>", self._hover_gizmo, add="+")
+        w.bind("<Leave>", lambda e: self._ovl_set_hover(None, 0, 0), add="+")
         # the mouse wheel is handled by the app (zoom / Shift: fly speed / Alt: field of view)
-        w.bind("<Double-Button-1>", lambda e: self.frame())
+        w.bind("<Double-Button-1>", lambda e: self._ovl_at(e.x, e.y) is None and self.frame())
+
+    # ---------------------------------------------------------- see-through controls drawn in the view
+    def _ovl_at(self, x, y):
+        vw, vh = self._size()
+        for o in reversed(self.overlays):
+            if o.visible:
+                ox, oy = o.pos(vw, vh)
+                if o.contains(x - ox, y - oy):
+                    return o
+        return None
+
+    def _ovl_local(self, o, x, y):
+        ox, oy = o.pos(*self._size())
+        return x - ox, y - oy
+
+    def _ovl_set_hover(self, o, x, y):
+        if o is not self._ovl_hover and self._ovl_hover is not None:
+            self._ovl_hover.leave()
+        self._ovl_hover = o
+        cur = o.motion(*self._ovl_local(o, x, y)) if o is not None else ""
+        if not self.fly and self._mw is not None:
+            try:
+                self._mw.configure(cursor=cur)
+            except tk.TclError:
+                pass
+
+    def _sync_overlays(self):
+        if self.r is not None:
+            vw, vh = self._size()
+            self.r.overlays = [(id(o), o.image(), *o.pos(vw, vh)) for o in self.overlays if o.visible]
 
     def _press(self, e, kind, button=0):
         if self.fly:
+            return
+        o = self._ovl_at(e.x, e.y)
+        if o is not None:
+            if button == 1:
+                self._ovl_grab = o
+                o.press(*self._ovl_local(o, e.x, e.y))
             return
         self._click = (e.x, e.y) if button == 1 else None
         if button == 1 and self.r is not None:
@@ -1950,6 +2065,10 @@ class _ViewMixin:
             pass
 
     def _release(self, e):
+        if self._ovl_grab is not None:
+            o, self._ovl_grab = self._ovl_grab, None
+            o.release(*self._ovl_local(o, e.x, e.y))
+            return
         click, self._click = self._click, None
         was = self._drag
         self._drag = None
@@ -1957,6 +2076,9 @@ class _ViewMixin:
             self._pick_bone(e.x, e.y)
 
     def _motion(self, e):
+        if self._ovl_grab is not None:
+            self._ovl_grab.drag(*self._ovl_local(self._ovl_grab, e.x, e.y))
+            return
         if not self._drag or self.r is None:
             return
         if self._click and abs(e.x - self._click[0]) + abs(e.y - self._click[1]) < 4:
@@ -2023,7 +2145,11 @@ class _ViewMixin:
         return best[1]
 
     def _hover_gizmo(self, e):
-        if self.r is None or self.fly or self._drag or self.r.opts.get("tool") is None:
+        if self.r is None or self.fly or self._drag or self._ovl_grab is not None:
+            return
+        o = self._ovl_at(e.x, e.y)
+        self._ovl_set_hover(o, e.x, e.y)
+        if o is not None or self.r.opts.get("tool") is None:
             return
         hit = self._gizmo_hit(e.x, e.y)
         if hit != self.r.opts.get("gizmo_hover"):
@@ -2303,6 +2429,7 @@ class _ViewMixin:
         w, h = self._size()
         self._make_current()
         scale = 2 if max(w, h) < 2000 else 1
+        self.r.overlays = []  # just the model
         img = self.r.read_pixels(w * scale, h * scale)
         Image.fromarray(img).save(path)
         self.request()
@@ -2313,10 +2440,7 @@ class _ViewMixin:
             self._redraw_job = self.after_idle(self._redraw_now)
         g = getattr(self, "gizmo", None)
         if g is not None:
-            g.request()
-        tb = getattr(self, "toolbar", None)
-        if tb is not None and tb.drawn_bg != NavGizmo._bg(self):  # (it only changes with the background)
-            tb.request()
+            g._dirty = True  # it shows the camera's angle
 
     def snap_to(self, back, ms=220):
         """Turn the camera (around the point it looks at) so it looks from direction `back`, animated."""
@@ -2392,6 +2516,7 @@ def _make_window_view(parent, bg, on_error, on_ready):
             if self.r is None:
                 return
             try:
+                self._sync_overlays()
                 self.r.render(*self._size(), 0)
             except Exception as e:
                 self._fail(e)
@@ -2443,6 +2568,7 @@ class _OffscreenView(tk.Frame, _ViewMixin):
         from PIL import Image, ImageTk
         w, h = self._size()
         try:
+            self._sync_overlays()
             img = Image.fromarray(self.r.read_pixels(w, h))
         except Exception as e:
             self._fail(e)
