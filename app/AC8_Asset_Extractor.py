@@ -338,6 +338,33 @@ class SessionLog:
 SLOG = SessionLog()
 
 
+def monitor_area(widget):
+    """(left, top, right, bottom) of the work area of the monitor the widget is on. Tk's screen size is only the
+    primary monitor's, so on Windows this asks the system; elsewhere it falls back to Tk's screen."""
+    if IS_WIN:
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class MONITORINFO(ctypes.Structure):
+                _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
+                            ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD)]
+            pt = wintypes.POINT(widget.winfo_rootx() + widget.winfo_width() // 2,
+                                widget.winfo_rooty() + widget.winfo_height() // 2)
+            user32 = ctypes.windll.user32
+            user32.MonitorFromPoint.restype = wintypes.HMONITOR
+            user32.MonitorFromPoint.argtypes = [wintypes.POINT, wintypes.DWORD]
+            mon = user32.MonitorFromPoint(pt, 2)  # MONITOR_DEFAULTTONEAREST
+            info = MONITORINFO()
+            info.cbSize = ctypes.sizeof(MONITORINFO)
+            if mon and user32.GetMonitorInfoW(mon, ctypes.byref(info)):
+                r = info.rcWork
+                return r.left, r.top, r.right, r.bottom
+        except Exception:
+            pass
+    return 0, 0, widget.winfo_screenwidth(), widget.winfo_screenheight()
+
+
 def open_folder(path):
     path = Path(path)
     if not path.exists():
@@ -765,10 +792,12 @@ class Dropdown(tk.Frame):
             sb.pack(side="right", fill="y")
         cv.pack(side="left", fill="both", expand=True)
         # under the box, or above it when there's no room below
+        # (kept on the monitor the box is on: other monitors can sit left of or above the main one)
+        ml, mt, mr, mb = monitor_area(self)
         x, y = self.winfo_rootx(), self.winfo_rooty() + self.winfo_height() + 2
-        if y + h + 4 > self.winfo_screenheight():
+        if y + h + 4 > mb:
             y = self.winfo_rooty() - h - 4
-        pop.geometry(f"+{max(0, min(x, self.winfo_screenwidth() - w - 4))}+{max(0, y)}")
+        pop.geometry(f"+{max(ml, min(x, mr - w - 4))}+{max(mt, y)}")
         sel = next((i for i, (v, _l) in enumerate(self.options) if v == cur), 0)
         self._hi = None
         if len(self.options) > rows_n:  # show the selected one
@@ -1694,7 +1723,8 @@ class App(tk.Tk):
         w = tk.Toplevel(self, bg=C["bg0"])
         self.settings_win = w
         w.title("Settings")
-        sw, sh = round(800 * SCALE), min(round(800 * SCALE), self.winfo_screenheight() - 80)
+        ml, mt, mr, mb = monitor_area(self)
+        sw, sh = round(800 * SCALE), min(round(800 * SCALE), mb - mt - 80)
         w.geometry(f"{sw}x{sh}")
         w.transient(self)
         pad = tk.Frame(w, bg=C["bg0"], padx=22, pady=18)
@@ -3923,10 +3953,11 @@ class App(tk.Tk):
         fw, fh = m.image_sizes.get(ii, src.size)
         w = tk.Toplevel(self, bg=C["bg0"])
         w.title(f"{name}  ({fw} × {fh})")
-        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+        ml, mt, mr, mb = monitor_area(self)  # the monitor the app is on
+        sw, sh = mr - ml, mb - mt
         side = min(round(sh * 0.8), round(sw * 0.8), max(src.size) + 40)
         ww, wh = max(side, 420), max(side, 420) + 60
-        w.geometry(f"{ww}x{wh}+{max(0, (sw - ww) // 2)}+{max(0, (sh - wh) // 2 - 20)}")  # middle of the screen
+        w.geometry(f"{ww}x{wh}+{ml + max(0, (sw - ww) // 2)}+{mt + max(0, (sh - wh) // 2 - 20)}")  # middle of it
         top = tk.Frame(w, bg=C["bg0"], padx=10, pady=8)
         top.pack(fill="x")
         chan = tk.StringVar(value="all")
