@@ -120,6 +120,10 @@ AC8 Asset Extractor\
 
 ## Version history
 
+v1.2.3: font extraction.
+- The game's fonts now come out as their original `.ttf` / `.otf` files, in `2_Final_Export\Fonts`.
+- New **Fonts** group in the catalog: game fonts, menu fonts and Unreal Engine fonts.
+
 v1.2.2: bone posing, faster extraction and a tidier viewer.
 - **Bones:** click a bone in the 3D view, then **G** (translate) or **R** (rotate) and drag the arrows / rings, in
   the bone's own X / Y / Z. Exact Translation / Rotation numbers (and rotation sliders) in the Bones panel,
