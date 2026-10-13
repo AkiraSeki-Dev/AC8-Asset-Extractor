@@ -1534,7 +1534,7 @@ class Renderer:
             GL.glUniform3fv(u["uNumCol"], 6, self.livery["num_col"])
             GL.glUniform4fv(u["uNumEdge"], 6, self.livery["num_edge"])
 
-    def _lines(self, vp, pts, cols, width=1.0, depth=True, points=0.0):
+    def _lines(self, vp, pts, cols, width=1.0, depth=True, points=0.0, triangles=False):
         GL = self.GL
         if not len(pts):
             return
@@ -1557,7 +1557,9 @@ class Renderer:
             GL.glLineWidth(width)
         except Exception:
             pass
-        if points:
+        if triangles:
+            GL.glDrawArrays(GL.GL_TRIANGLES, 0, len(data))
+        elif points:
             try:
                 GL.glPointSize(points)
             except Exception:
@@ -1603,7 +1605,7 @@ class Renderer:
         head = w[:3, 3].copy()
         axes = w[:3, :3] / np.maximum(np.linalg.norm(w[:3, :3], axis=0), 1e-12)[None, :]
         dist = float(np.linalg.norm(self.cam.eye() - head))
-        return head, axes, max(dist * math.tan(math.radians(self.cam.fov) / 2) * 0.17, 1e-4)
+        return head, axes, max(dist * math.tan(math.radians(self.cam.fov) / 2) * 0.2, 1e-4)
 
     def gizmo_ring(self, head, axes, L, a):
         """Points of the rotate ring around axis a (in the plane of the other two)."""
@@ -1617,23 +1619,30 @@ class Renderer:
             return
         head, axes, L = g
         hover = self.opts.get("gizmo_hover")
-        pts, cols, tips, tcols = [], [], [], []
+        pts, cols, tris, tcols = [], [], [], []
         for a in range(3):
             c = (1.0, 0.85, 0.3, 1.0) if hover == a else (*self.GIZMO_COLS[a], 1.0)
-            if self.opts["tool"] == "move":
-                end = head + axes[:, a] * L
-                pts += [head, end]
+            if self.opts["tool"] == "move":  # a shaft and a cone tip, like Blender's translate arrows
+                u = axes[:, a]
+                base, tip = head + u * L * 0.78, head + u * L * 1.02
+                pts += [head, base]
                 cols += [c, c]
-                tips.append(end)
-                tcols.append(c)
+                v1, v2 = axes[:, (a + 1) % 3], axes[:, (a + 2) % 3]
+                rad, n = L * 0.065, 14
+                ring = [base + rad * (math.cos(2 * math.pi * i / n) * v1 + math.sin(2 * math.pi * i / n) * v2)
+                        for i in range(n + 1)]
+                dark = (c[0] * 0.6, c[1] * 0.6, c[2] * 0.6, 1.0)
+                for i in range(n):
+                    tris += [tip, ring[i], ring[i + 1], base, ring[i + 1], ring[i]]
+                    tcols += [c, c, c, dark, dark, dark]
             else:
                 ring = self.gizmo_ring(head, axes, L, a)
                 for i in range(len(ring) - 1):
                     pts += [ring[i], ring[i + 1]]
                     cols += [c, c]
         self._lines(vp, pts, cols, width=3.0, depth=False)
-        if tips:
-            self._lines(vp, tips, tcols, depth=False, points=11.0)
+        if tris:
+            self._lines(vp, tris, tcols, depth=False, triangles=True)
         self._lines(vp, [head], [(1, 1, 1, 1)], depth=False, points=7.0)
 
     def _draw_skeleton(self, vp):
@@ -2044,6 +2053,10 @@ class _ViewMixin:
     def _press(self, e, kind, button=0):
         if self.fly:
             return
+        try:
+            e.widget.focus_set()  # (out of a number field, so the view's keys work)
+        except Exception:
+            pass
         o = self._ovl_at(e.x, e.y)
         if o is not None:
             if button == 1:
@@ -2058,10 +2071,6 @@ class _ViewMixin:
                 self._click = None
                 return
         self._drag = (kind, e.x, e.y)
-        try:
-            e.widget.focus_set()
-        except Exception:
-            pass
 
     def _release(self, e):
         if self._ovl_grab is not None:
@@ -2397,18 +2406,44 @@ class _ViewMixin:
         self.r.set_livery(spec)
         self.request()
 
-    def set_pose(self, bone_k, angles):
-        m = self.r.model
-        jn = m.joints[bone_k]
-        move = tuple(self.r.opts["pose"].get(jn, ())[3:6])
-        pz = tuple(angles) + move
-        if any(pz):
-            self.r.opts["pose"][jn] = pz
+    def set_pose6(self, bone_k, pz):
+        """A bone's whole pose: (rx, ry, rz) degrees then (tx, ty, tz)."""
+        jn = self.r.model.joints[bone_k]
+        if any(abs(v) > 1e-12 for v in pz):
+            self.r.opts["pose"][jn] = tuple(float(v) for v in pz)
         else:
             self.r.opts["pose"].pop(jn, None)
         self._make_current()
         self.r.update_pose()
         self.request()
+
+    def frame_bone(self, ms=250):
+        """Blender's View Selected (.): turn and zoom the camera to look at the selected bone, animated."""
+        r = self.r
+        k = r.opts.get("bone") if r is not None else None
+        if r is None or r.model is None or k is None:
+            return False
+        self.set_fly(False)
+        m = r.model
+        jn = m.joints[k]
+        head = r.world[jn][:3, 3].copy()
+        kids = [r.world[c][:3, 3] for c in m.nodes[jn]["children"] if c in set(m.joints)]
+        size = max([float(np.linalg.norm(c - head)) for c in kids] + [r.cam.radius * 0.04])
+        cam = r.cam
+        t0, d0, start = cam.target.copy(), cam.dist, time.time()
+        d1 = max(size * 3.0 / max(math.tan(math.radians(cam.fov) / 2), 0.05) * 0.5, cam.radius * 0.01)
+        if getattr(self, "_snap_job", None):
+            self.after_cancel(self._snap_job)
+
+        def step():
+            t = min((time.time() - start) * 1000 / ms, 1.0)
+            e = t * t * (3 - 2 * t)
+            cam.target = t0 + (head - t0) * e
+            cam.dist = d0 + (d1 - d0) * e
+            self.request()
+            self._snap_job = self.after(15, step) if t < 1 else None
+        step()
+        return True
 
     def reset_bone(self, bone_k, rotation=True, translation=True):
         """Put one bone's rotation and/or translation back to the rest pose."""

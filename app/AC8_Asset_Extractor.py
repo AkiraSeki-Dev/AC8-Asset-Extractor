@@ -3906,8 +3906,8 @@ class App(tk.Tk):
             depth[jn] = depth.get(par, -1) + 1 if par in jset else 0
             lb.insert("end", "  " * depth[jn] + m.nodes[jn]["name"])
         self._view_bone = None
-        self._set_bone_sliders((0, 0, 0))
-        self.view_bone_name.set("Pick a bone to turn it" if m.joints else "This model has no skeleton")
+        self._set_bone_fields(())
+        self.view_bone_name.set("Pick a bone" if m.joints else "This model has no skeleton")
 
     def _view_bone_selected(self, _e=None):
         sel = self.view_bones.curselection()
@@ -3919,7 +3919,7 @@ class App(tk.Tk):
         self.view_bone_name.set(self._view_model.nodes[jn]["name"])
         if self.glv and self.glv.r:
             self.glv.r.opts["bone"] = k
-            self._set_bone_sliders(self.glv.r.opts["pose"].get(jn, (0, 0, 0))[:3])
+            self._set_bone_fields(self.glv.r.opts["pose"].get(jn, ()))
             if not self.v_view_skel.get():
                 self.v_view_skel.set(True)
                 self._view_apply()
@@ -3929,21 +3929,47 @@ class App(tk.Tk):
                 tools.set_active(getattr(self, "_last_bone_tool", "move"))
             self.glv.request()
 
-    def _set_bone_sliders(self, angles):
-        self._bone_sync = True
-        for sc, a in zip(self.view_rot, angles):
-            sc.set(a)
-        self._bone_sync = False
+    def _set_bone_fields(self, pose):
+        """Show a bone's pose (rx, ry, rz[, tx, ty, tz]) in the Translation / Rotation fields."""
+        pz = list(pose) + [0.0] * (6 - len(pose))
+        vals = pz[3:6] + pz[0:3]
+        for i, v in enumerate(vals):
+            self.v_bone[i].set(f"{float(v):.3f}" if i < 3 else f"{float(v):.1f}")
 
-    def _view_bone_rot(self, _v=None):
-        if getattr(self, "_bone_sync", False) or self._view_bone is None or self.glv is None or self.glv.r is None:
-            return
-        want = tuple(float(sc.get()) for sc in self.view_rot)
+    def _bone_pose6(self):
         jn = self._view_model.joints[self._view_bone]
-        cur = self.glv.r.opts["pose"].get(jn, (0, 0, 0))[:3]
-        if all(abs(round(c) - w) < 0.5 for c, w in zip(cur, want)):
-            return  # the sliders only echo the pose (they're whole degrees; the gizmo isn't): keep it exact
-        self.glv.set_pose(self._view_bone, want)
+        pz = list(self.glv.r.opts["pose"].get(jn, ()))
+        return pz + [0.0] * (6 - len(pz))
+
+    def _view_bone_field(self, i):
+        """A typed value: field i = translation X Y Z (0-2) or rotation X Y Z (3-5)."""
+        if self._view_bone is None or self.glv is None or self.glv.r is None:
+            return
+        try:
+            v = float(self.v_bone[i].get().replace(",", ".").replace("°", "").strip() or 0)
+        except ValueError:
+            self._set_bone_fields(self._bone_pose6())  # not a number: put the real value back
+            return
+        pz = self._bone_pose6()
+        slot = i + 3 if i < 3 else i - 3  # pose order is rotation, then translation
+        if abs(pz[slot] - v) < 1e-9:
+            return
+        pz[slot] = v
+        self.glv.set_pose6(self._view_bone, pz)
+        self._set_bone_fields(pz)
+
+    def _view_bone_step(self, i, up, e):
+        if self._view_bone is None:
+            return "break"
+        fine = e.state & 0x0001
+        step = (0.01 if fine else 0.1) if i < 3 else (0.1 if fine else 1.0)
+        try:
+            v = float(self.v_bone[i].get().replace(",", ".") or 0)
+        except ValueError:
+            v = 0.0
+        self.v_bone[i].set(f"{v + (step if up else -step):.4f}")
+        self._view_bone_field(i)
+        return "break"
 
     def _view_tool_changed(self, tool):
         m = self._view_model
@@ -3976,7 +4002,7 @@ class App(tk.Tk):
         if k != self._view_bone or self.glv is None or self.glv.r is None:
             return
         jn = self._view_model.joints[k]
-        self._set_bone_sliders(self.glv.r.opts["pose"].get(jn, (0, 0, 0))[:3])
+        self._set_bone_fields(self.glv.r.opts["pose"].get(jn, ()))
 
     def _view_reset_bone(self, rotation=False, translation=False):
         """The selected bone's rotation / translation back to its rest pose (Alt+R / Alt+G, like Blender)."""
@@ -3984,14 +4010,13 @@ class App(tk.Tk):
             self.v_view_status.set("Pick a bone first")
             return
         self.glv.reset_bone(self._view_bone, rotation=rotation, translation=translation)
-        if rotation:
-            self._set_bone_sliders((0, 0, 0))
+        self._set_bone_fields(self._bone_pose6())
         self.v_view_status.set(("Rotation" if rotation else "Translation") + " reset")
 
     def _view_reset_pose(self):
         if self.glv and self.glv.r:
             self.glv.reset_pose()
-        self._set_bone_sliders((0, 0, 0))
+        self._set_bone_fields(())
 
     def _fill_view_info(self):
         m, st = self._view_model, self._view_stats
@@ -4224,7 +4249,8 @@ class App(tk.Tk):
         ("Bones", (("Translate tool / Rotate tool", "G  /  R  (or the buttons on the left)"),
                    ("Pick a bone", "Click it  (Skeleton on)"), ("Translate", "Drag an arrow"),
                    ("Rotate (the bone's own X Y Z)", "Drag a ring"), ("Put the tool away", "G / R again"),
-                   ("Reset translation / rotation", "Alt + G  /  Alt + R"))),
+                   ("Reset translation / rotation", "Alt + G  /  Alt + R"),
+                   ("Look at the selected bone", ".  (period)"))),
     )
 
     def _view_controls(self):
@@ -4276,6 +4302,9 @@ class App(tk.Tk):
             return "break"
         if ks == "f" and not ctrl:
             self.glv.frame()
+        if ks in ("period", ".", "kp_decimal", "kp_delete") and self.glv.r is not None:  # . : look at the bone, like Blender
+            if not self.glv.frame_bone():
+                self.v_view_status.set("Pick a bone first ( . looks at the selected bone)")
 
     def _view_hint(self, text):
         m = self._view_model
@@ -4386,19 +4415,32 @@ class App(tk.Tk):
         self.view_bone_name = tk.StringVar(value="Open a model")
         tk.Label(bones, textvariable=self.view_bone_name, bg=C["bg1"], fg=C["text1"], font=F["bold"],
                  anchor="w").pack(fill="x")
-        for axis in "XYZ":
+        # the selected bone's pose as numbers: type a value (Enter), or scroll over a field (Shift: finer)
+        self.v_bone = [tk.StringVar(value="0") for _ in range(6)]  # translation X Y Z, rotation X Y Z
+        for title, first, unit in (("Translation", 0, ""), ("Rotation", 3, "°")):
+            tk.Label(bones, text=title, bg=C["bg1"], fg=C["text3"], font=F["small"], anchor="w").pack(
+                fill="x", pady=(6, 1))
             r_ = tk.Frame(bones, bg=C["bg1"])
             r_.pack(fill="x")
-            tk.Label(r_, text=axis, bg=C["bg1"], fg=C["text3"], font=F["small"], width=2).pack(side="left")
-            val = tk.Label(r_, text="0°", bg=C["bg1"], fg=C["text2"], font=F["small"], width=5, anchor="e")
-            val.pack(side="right")
-            sc = tk.Scale(r_, from_=-180, to=180, orient="horizontal", resolution=1, showvalue=False,
-                          bg=C["accent"], troughcolor=C["border2"], activebackground=C["accent_hover"],
-                          highlightthickness=0, bd=0, sliderrelief="flat", sliderlength=round(14 * SCALE),
-                          width=round(10 * SCALE),
-                          command=lambda v, lbl=val: (lbl.configure(text=f"{float(v):.0f}°"), self._view_bone_rot()))
-            sc.pack(side="left", fill="x", expand=True, pady=4)
-            self.view_rot = getattr(self, "view_rot", []) + [sc]
+            for n, axis in enumerate("XYZ"):
+                col = ("#ff3352", "#8bdc00", "#2890ff")[n]
+                cell = tk.Frame(r_, bg=C["bg2"], highlightthickness=1, highlightbackground=C["border2"],
+                                highlightcolor=C["accent"])
+                cell.pack(side="left", fill="x", expand=True, padx=(0 if n == 0 else 4, 0))
+                tk.Label(cell, text=axis, bg=C["bg2"], fg=col, font=F["bold"], padx=6).pack(side="left")
+                ent = tk.Entry(cell, textvariable=self.v_bone[first + n], bg=C["bg2"], fg=C["text1"], bd=0,
+                               relief="flat", insertbackground=C["accent"], font=F["mono_s"], width=7,
+                               justify="right", highlightthickness=0)
+                ent.pack(side="left", fill="x", expand=True, ipady=3)
+                if unit:
+                    tk.Label(cell, text=unit, bg=C["bg2"], fg=C["text3"], font=F["small"]).pack(side="left")
+                tk.Frame(cell, bg=C["bg2"], width=4).pack(side="left")
+                i_ = first + n
+                for seq in ("<Return>", "<KP_Enter>", "<FocusOut>"):
+                    ent.bind(seq, lambda e, i_=i_: self._view_bone_field(i_))
+                ent.bind("<MouseWheel>", lambda e, i_=i_: self._view_bone_step(i_, e.delta > 0, e))
+                ent.bind("<Button-4>", lambda e, i_=i_: self._view_bone_step(i_, True, e))
+                ent.bind("<Button-5>", lambda e, i_=i_: self._view_bone_step(i_, False, e))
         rr = tk.Frame(bones, bg=C["bg1"])
         rr.pack(fill="x", pady=(4, 6))
         Button(rr, "Reset rotation", lambda: self._view_reset_bone(rotation=True), **small).pack(side="left")
