@@ -45,6 +45,7 @@ import ac8_catalog as catalog  # noqa: E402  (pure python, no extra packages)
 
 APP_NAME = "ACE Combat 8 Asset Extractor"
 APP_VERSION = "1.2.1"
+KOFI_URL = "https://ko-fi.com/akiraseki"
 CODE = Path(__file__).resolve().parent         # app/: the scripts and their fonts, icons and web viewer
 HERE = CODE.parent                             # the app folder (the exe, app/, AC8 Unpacker/, data/, logs/)
 DATA_DIR = HERE / "data"                       # your own files: settings, asset list, update history
@@ -1649,6 +1650,15 @@ class App(tk.Tk):
         rel.pack(side="left")
         rel.bind("<Button-1>", lambda e: __import__("webbrowser").open(__import__("ac8_update").RELEASES_PAGE))
         Button(row, "Check for updates", self.update_app, font=F["small"], padx=10, pady=4).pack(side="right")
+        row = tk.Frame(box, bg=C["bg1"])
+        row.pack(fill="x", pady=3)
+        label(row, "Support")
+        kofi = tk.Label(row, text="Buy me a coffee on Ko-fi", bg=C["bg1"], fg=C["accent"], font=F["base"],
+                        cursor="hand2")
+        kofi.pack(side="left")
+        kofi.bind("<Button-1>", lambda e: __import__("webbrowser").open(KOFI_URL))
+        tk.Label(row, text="  — if the app helps you, thank you!", bg=C["bg1"], fg=C["text3"],
+                 font=F["small"]).pack(side="left")
         tk.Label(box, text="Disclaimer: This tool is intended for legitimate modding, research, and educational use "
                            "only. Unauthorized redistribution, commercial exploitation, and misuse of copyrighted "
                            "assets are not supported. All extracted assets remain the property of their respective "
@@ -3915,7 +3925,7 @@ class App(tk.Tk):
                 self._view_apply()
             tools = getattr(self, "view_tools", None)
             if tools is not None and tools.active is None and tools.visible:
-                # a picked bone gets a gizmo straight away: Move the first time, then whichever tool was used last
+                # a picked bone gets a gizmo straight away: Translate the first time, then the tool used last
                 tools.set_active(getattr(self, "_last_bone_tool", "move"))
             self.glv.request()
 
@@ -3948,7 +3958,7 @@ class App(tk.Tk):
             self.v_view_skel.set(True)
             self._view_apply()
         self.v_view_panel.set("bones")
-        self.v_view_status.set(("Move" if tool == "move" else "Rotate") + " · " +
+        self.v_view_status.set(("Translate" if tool == "move" else "Rotate") + " · " +
                                ("drag an arrow" if tool == "move" else "drag a ring") +
                                (" of the selected bone" if self._view_bone is not None else " · click a bone first"))
 
@@ -3967,6 +3977,16 @@ class App(tk.Tk):
             return
         jn = self._view_model.joints[k]
         self._set_bone_sliders(self.glv.r.opts["pose"].get(jn, (0, 0, 0))[:3])
+
+    def _view_reset_bone(self, rotation=False, translation=False):
+        """The selected bone's rotation / translation back to its rest pose (Alt+R / Alt+G, like Blender)."""
+        if self._view_bone is None or self.glv is None or self.glv.r is None:
+            self.v_view_status.set("Pick a bone first")
+            return
+        self.glv.reset_bone(self._view_bone, rotation=rotation, translation=translation)
+        if rotation:
+            self._set_bone_sliders((0, 0, 0))
+        self.v_view_status.set(("Rotation" if rotation else "Translation") + " reset")
 
     def _view_reset_pose(self):
         if self.glv and self.glv.r:
@@ -4201,9 +4221,10 @@ class App(tk.Tk):
                       ("Look around", "Move the mouse"), ("Move", "W  A  S  D"), ("Down / up", "Q  /  E"),
                       ("Forward / back", "Mouse wheel"), ("Faster", "Hold Shift"))),
         ("Both", (("Fly speed", "Shift + mouse wheel"), ("Field of view", "Alt + mouse wheel"))),
-        ("Bones", (("Move tool / Rotate tool", "G  /  R  (or the buttons on the left)"),
-                   ("Pick a bone", "Click it  (Skeleton on)"), ("Move", "Drag an arrow"),
-                   ("Rotate (the bone's own X Y Z)", "Drag a ring"), ("Put the tool away", "G / R again"))),
+        ("Bones", (("Translate tool / Rotate tool", "G  /  R  (or the buttons on the left)"),
+                   ("Pick a bone", "Click it  (Skeleton on)"), ("Translate", "Drag an arrow"),
+                   ("Rotate (the bone's own X Y Z)", "Drag a ring"), ("Put the tool away", "G / R again"),
+                   ("Reset translation / rotation", "Alt + G  /  Alt + R"))),
     )
 
     def _view_controls(self):
@@ -4244,8 +4265,12 @@ class App(tk.Tk):
             return "break"
         if self.glv.key_down(e.keysym):  # free fly: W A S D Q E (Shift faster)
             return "break"
+        alt = e.state & (0x20000 if IS_WIN else 0x0008)
+        if ks in ("g", "r") and alt and getattr(self, "view_tools", None) is not None and self.view_tools.visible:
+            self._view_reset_bone(rotation=ks == "r", translation=ks == "g")  # Alt+G / Alt+R: clear, like Blender
+            return "break"
         if ks in ("g", "r") and not ctrl and getattr(self, "view_tools", None) is not None \
-                and self.view_tools.visible:  # bone tools: G move, R rotate (again: put it away)
+                and self.view_tools.visible:  # bone tools: G translate, R rotate (again: put it away)
             t = "move" if ks == "g" else "rotate"
             self.view_tools.set_active(None if self.view_tools.active == t else t)
             return "break"
@@ -4374,7 +4399,12 @@ class App(tk.Tk):
                           command=lambda v, lbl=val: (lbl.configure(text=f"{float(v):.0f}°"), self._view_bone_rot()))
             sc.pack(side="left", fill="x", expand=True, pady=4)
             self.view_rot = getattr(self, "view_rot", []) + [sc]
-        Button(bones, "Reset pose", self._view_reset_pose, **small).pack(anchor="w", pady=(4, 6))
+        rr = tk.Frame(bones, bg=C["bg1"])
+        rr.pack(fill="x", pady=(4, 6))
+        Button(rr, "Reset rotation", lambda: self._view_reset_bone(rotation=True), **small).pack(side="left")
+        Button(rr, "Reset translation", lambda: self._view_reset_bone(translation=True), **small).pack(
+            side="left", padx=(6, 0))
+        Button(rr, "Reset all bones", self._view_reset_pose, **small).pack(side="right")
         lbf = tk.Frame(bones, bg=C["bg2"], highlightthickness=1, highlightbackground=C["border2"])
         lbf.pack(fill="both", expand=True)
         self.view_bones = tk.Listbox(lbf, bg=C["bg2"], fg=C["text2"], selectbackground=C["accent"],

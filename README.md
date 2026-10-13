@@ -65,7 +65,7 @@ Open it with **View 3D** on an extraction or **Preview** in the catalog. The **C
 | Free fly | move the mouse to look, **W A S D** move, **Q** down, **E** up, wheel forward/back |
 | Fly speed | **Shift + mouse wheel** |
 | Field of view | **Alt + mouse wheel** |
-| Pose a bone | **G** (move) or **R** (rotate), or the buttons on the left of the view; click a bone, then drag an arrow or a ring. Rotation follows the bone's own X / Y / Z. |
+| Pose a bone | Click a bone, then drag an arrow (**G**, translate) or a ring (**R**, rotate); the buttons on the left of the view switch too. Rotation follows the bone's own X / Y / Z. **Alt + G** / **Alt + R** reset the bone's translation / rotation. |
 
 - **Model → All parts together** shows every mesh in the list at once (damaged / alternate versions left out), e.g. a boss built from many parts. In the catalog, bosses have **Preview whole vehicle**.
 - **Aircraft panel** (top right of the view): pick a **Livery** and attach the **Gear**, **Probe** and **Pylons**.
@@ -125,6 +125,11 @@ v1.1: a Windows installer (`…_Setup.exe`) that includes its own Python and pac
 adds Start menu / desktop shortcuts and an uninstaller. The zip stays available for portable use.
 
 v1.0: first public release.
+
+## Support
+
+If the app helps you and you'd like to support it: [ko-fi.com/akiraseki](https://ko-fi.com/akiraseki) ☕
+(also in the app: Settings → APP → Support).
 
 ## Credits
 

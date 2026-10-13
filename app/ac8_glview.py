@@ -1603,7 +1603,7 @@ class Renderer:
         head = w[:3, 3].copy()
         axes = w[:3, :3] / np.maximum(np.linalg.norm(w[:3, :3], axis=0), 1e-12)[None, :]
         dist = float(np.linalg.norm(self.cam.eye() - head))
-        return head, axes, max(dist * math.tan(math.radians(self.cam.fov) / 2) * 0.28, 1e-4)
+        return head, axes, max(dist * math.tan(math.radians(self.cam.fov) / 2) * 0.17, 1e-4)
 
     def gizmo_ring(self, head, axes, L, a):
         """Points of the rotate ring around axis a (in the plane of the other two)."""
@@ -1883,17 +1883,16 @@ class NavGizmo(_Overlay):
 
 
 class ToolBar(_Overlay):
-    """Blender-style tool buttons for the bone gizmo, stacked: move (G) and rotate (R). Click one to use it, click
+    """Blender-style tool buttons for the bone gizmo, stacked: translate (G) and rotate (R). Click one to use it, click
     it again to put it away."""
 
-    TOOLS = (("move", "Move bone  (G)"), ("rotate", "Rotate bone  (R)"))
+    TOOLS = (("move", "Translate bone  (G)"), ("rotate", "Rotate bone  (R)"))
 
     def __init__(self, view, size=34, on_change=None, on_hint=None):
         self.bs, self.gap = size, 3
         _Overlay.__init__(self, view, size, len(self.TOOLS) * size + (len(self.TOOLS) - 1) * self.gap)
         self.on_change, self.on_hint = on_change, on_hint
         self.active, self._hover = None, None
-        view.toolbar = self
 
     def pos(self, vw, vh):
         return 8, (vh - self.h) // 2
@@ -1986,7 +1985,7 @@ class _ViewMixin:
         self.fly = False          # free fly: mouse turns the camera, W A S D Q E move it
         self.overlays, self._ovl_grab, self._ovl_hover = [], None, None
         self.on_bone_pick = None  # called with the bone index clicked in the view
-        self.on_pose = None       # called with the bone index after the move / rotate gizmo changed it
+        self.on_pose = None       # called with the bone index after the translate / rotate gizmo changed it
         self._click = None
         self.on_fly = None        # called with True / False when free fly turns on / off
         self._mw = None
@@ -2405,6 +2404,23 @@ class _ViewMixin:
         pz = tuple(angles) + move
         if any(pz):
             self.r.opts["pose"][jn] = pz
+        else:
+            self.r.opts["pose"].pop(jn, None)
+        self._make_current()
+        self.r.update_pose()
+        self.request()
+
+    def reset_bone(self, bone_k, rotation=True, translation=True):
+        """Put one bone's rotation and/or translation back to the rest pose."""
+        jn = self.r.model.joints[bone_k]
+        pz = list(self.r.opts["pose"].get(jn, ()))
+        pz += [0.0] * (6 - len(pz))
+        if rotation:
+            pz[:3] = [0.0, 0.0, 0.0]
+        if translation:
+            pz[3:6] = [0.0, 0.0, 0.0]
+        if any(pz):
+            self.r.opts["pose"][jn] = tuple(pz)
         else:
             self.r.opts["pose"].pop(jn, None)
         self._make_current()
