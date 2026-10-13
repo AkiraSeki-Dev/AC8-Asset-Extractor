@@ -3738,7 +3738,8 @@ class App(tk.Tk):
         w.title(f"{name}  ({fw} × {fh})")
         sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
         side = min(round(sh * 0.8), round(sw * 0.8), max(src.size) + 40)
-        w.geometry(f"{max(side, 420)}x{max(side, 420) + 60}")
+        ww, wh = max(side, 420), max(side, 420) + 60
+        w.geometry(f"{ww}x{wh}+{max(0, (sw - ww) // 2)}+{max(0, (sh - wh) // 2 - 20)}")  # middle of the screen
         top = tk.Frame(w, bg=C["bg0"], padx=10, pady=8)
         top.pack(fill="x")
         chan = tk.StringVar(value="all")
