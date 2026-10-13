@@ -3913,6 +3913,10 @@ class App(tk.Tk):
             if not self.v_view_skel.get():
                 self.v_view_skel.set(True)
                 self._view_apply()
+            tools = getattr(self, "view_tools", None)
+            if tools is not None and tools.active is None and tools.winfo_ismapped():
+                # a picked bone gets a gizmo straight away: Move the first time, then whichever tool was used last
+                tools.set_active(getattr(self, "_last_bone_tool", "move"))
             self.glv.request()
 
     def _set_bone_sliders(self, angles):
@@ -3933,6 +3937,8 @@ class App(tk.Tk):
 
     def _view_tool_changed(self, tool):
         m = self._view_model
+        if tool is not None:
+            self._last_bone_tool = tool  # picking the next bone brings this tool back
         if tool is None:
             self._view_hint(None)
             return
