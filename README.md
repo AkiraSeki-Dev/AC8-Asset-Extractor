@@ -12,21 +12,21 @@ textures, and other game resources for personal projects and technical analysis.
 
 Get the latest version from the [Releases page](https://github.com/AkiraSeki-Dev/AC8-Asset-Extractor/releases/latest):
 
-- **`AC8_Asset_Extractor_vX.Y_Setup.exe` (recommended):** run it and follow the steps. It brings its own Python, so
+- **`AC8_Asset_Extractor_vX.Y.Z_Setup.exe` (recommended):** run it and follow the steps. It brings its own Python, so
   nothing else needs installing, and it doesn't need admin rights. It adds a Start menu shortcut (and a desktop one if
   you like) and appears in Windows' **Apps** list for uninstalling. Windows may show "Windows protected your PC" because
   the installer isn't signed: click **More info → Run anyway**.
-- **`AC8_Asset_Extractor_vX.Y.zip` (portable):** unzip it anywhere and double-click **`AC8 Asset Extractor.exe`**.
+- **`AC8_Asset_Extractor_vX.Y.Z.zip` (portable):** unzip it anywhere and double-click **`AC8 Asset Extractor.exe`**.
   Needs [Python 3.10 or newer](https://www.python.org/downloads/) installed (tick **Add python.exe to PATH**).
 
 ## First-time setup
 
-Open **Settings** (top right). An orange **Setup needed** bar tells you if anything is still missing.
+Open **Settings** (top right). A red **Setup needed** bar on the main screen tells you if anything is still missing.
 
-1. **Install packages:** only for the zip version: installs what the app needs (one click). The installer already
-   includes them.
-2. **Game folder:** usually found automatically through Steam. Otherwise use **Browse…** and pick the folder that
-   holds `start_protected_game.exe`.
+1. **Install packages** (Settings → SETUP): only for the zip version; installs what the app needs in one click. The
+   installer already includes them.
+2. **Game folder:** usually found automatically through Steam (or click **Auto-detect**). Otherwise use **Browse…**
+   and pick the folder that holds `start_protected_game.exe`.
 3. **AES key:** the game's files are encrypted, so the key is read from the running game, once:
    1. Click **Start game offline**. Steam closes for a moment, then the game starts in offline mode.
    2. Wait for the title screen, then click **Find key**.
@@ -51,7 +51,8 @@ Open **Settings** (top right). An orange **Setup needed** bar tells you if anyth
 
 ## 3D viewer
 
-Open it with **View 3D** on an extraction or **Preview** in the catalog. The **Controls** button (bottom right of the view) lists these too.
+Open it with **Preview 3D** (Assets tab), **Preview** in the catalog, or **View 3D** on an extraction. The **Controls**
+button (bottom right of the view) lists all of these.
 
 | Action | How |
 | --- | --- |
@@ -65,15 +66,20 @@ Open it with **View 3D** on an extraction or **Preview** in the catalog. The **C
 | Free fly | move the mouse to look, **W A S D** move, **Q** down, **E** up, wheel forward/back |
 | Fly speed | **Shift + mouse wheel** |
 | Field of view | **Alt + mouse wheel** |
-| Pose a bone | Click a bone, then drag an arrow (**G**, translate) or a ring (**R**, rotate); the buttons on the left of the view switch too. Rotation follows the bone's own X / Y / Z. **Alt + G** / **Alt + R** reset the bone's translation / rotation. The Bones panel shows its Translation and Rotation as numbers you can type (or scroll over). |
+| Pick a bone | click it in the view (with **Skeleton** on), or in the **Bones** list |
+| Translate / rotate a bone | **G** / **R** (or the buttons on the left of the view), then drag an arrow / a ring. Rotation uses the bone's own X / Y / Z |
+| Exact bone values | **Bones** panel: type the Translation / Rotation numbers (or scroll over them); Rotation also has sliders |
+| Reset a bone | **Alt + G** / **Alt + R**, or **Reset translation** / **Reset rotation** (Bones panel) |
 | Look at the selected bone | **.** (period) |
 
-- **Model → All parts together** shows every mesh in the list at once (damaged / alternate versions left out), e.g. a boss built from many parts. In the catalog, bosses have **Preview whole vehicle**.
-- **Aircraft panel** (top right of the view): pick a **Livery** and attach the **Gear**, **Probe** and **Pylons**.
+- **Model → All parts together** shows every mesh in the list at once (damaged / alternate versions left out), e.g.
+  a boss built from many parts. In the catalog, bosses have **Preview whole vehicle**.
+- **Aircraft panel** (top left of the view): pick a **Livery** and attach the **Gear**, **Probe** and **Pylons**.
   **Edit livery** changes the numbers, emblems and colours; **Save as…** keeps your version.
 - **Export textures…** (top bar) saves the model's textures with the livery baked in, in the PBR layout and size you
   choose.
-- **Screenshot** saves a PNG next to the model.
+- **Screenshot** saves a PNG of the view (without its buttons) next to the model.
+- Posing bones only changes what the viewer shows; exported files keep the model's original pose.
 
 ## Where things go
 
@@ -86,16 +92,18 @@ AC8 Asset Extractor\
   logs\                     one log per session (Logs folder link, bottom right)
   AC8_Exports\              your extractions:
     F18C_2026-10-12_1600\
+      1_Raw_UAssets\           the unpacked game files (only with Keep Raw)
       2_Final_Export\
         Textures\  Meshes\  FBX\  PBR_<preset>\  Textures_Export\  Liveries\
-      extraction_log.txt
+      extraction_info.txt     what was selected, when, and counts
+      extraction_log.txt      the full log
 ```
 
 ## Updating
 
 - **The app:** Settings → APP → **Check for updates**. Your settings, file list, exports and key are kept.
 - **The unpacking tools:** Settings → SETUP → **Check for updates**.
-- The app checks once a day by itself and notes any update in the log at the bottom.
+- The app checks once a day by itself (app and tools) and notes any update in the log at the bottom.
 
 ## Tips
 

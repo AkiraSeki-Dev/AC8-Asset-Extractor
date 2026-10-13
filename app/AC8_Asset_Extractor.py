@@ -3935,6 +3935,20 @@ class App(tk.Tk):
         vals = pz[3:6] + pz[0:3]
         for i, v in enumerate(vals):
             self.v_bone[i].set(f"{float(v):.3f}" if i < 3 else f"{float(v):.1f}")
+        for sc, a in zip(getattr(self, "view_rot", []), pz[0:3]):
+            sc.set(max(-180.0, min(180.0, ((float(a) + 180.0) % 360.0) - 180.0)))
+
+    def _view_bone_slider(self, n, v):
+        """Rotation slider n moved (whole degrees). Ignore the echo of a value set from the pose itself."""
+        if self._view_bone is None or self.glv is None or self.glv.r is None:
+            return
+        pz = self._bone_pose6()
+        cur = ((pz[n] + 180.0) % 360.0) - 180.0
+        if abs(round(cur) - v) < 0.5:
+            return
+        pz[n] = v
+        self.glv.set_pose6(self._view_bone, pz)
+        self.v_bone[3 + n].set(f"{v:.1f}")
 
     def _bone_pose6(self):
         jn = self._view_model.joints[self._view_bone]
@@ -4417,30 +4431,50 @@ class App(tk.Tk):
                  anchor="w").pack(fill="x")
         # the selected bone's pose as numbers: type a value (Enter), or scroll over a field (Shift: finer)
         self.v_bone = [tk.StringVar(value="0") for _ in range(6)]  # translation X Y Z, rotation X Y Z
-        for title, first, unit in (("Translation", 0, ""), ("Rotation", 3, "°")):
-            tk.Label(bones, text=title, bg=C["bg1"], fg=C["text3"], font=F["small"], anchor="w").pack(
-                fill="x", pady=(6, 1))
+        cols = ("#ff3352", "#8bdc00", "#2890ff")
+
+        def field(parent, i_, unit=""):
+            cell = tk.Frame(parent, bg=C["bg2"], highlightthickness=1, highlightbackground=C["border2"],
+                            highlightcolor=C["accent"])
+            ent = tk.Entry(cell, textvariable=self.v_bone[i_], bg=C["bg2"], fg=C["text1"], bd=0, relief="flat",
+                           insertbackground=C["accent"], font=F["mono_s"], width=7, justify="right",
+                           highlightthickness=0)
+            for seq in ("<Return>", "<KP_Enter>", "<FocusOut>"):
+                ent.bind(seq, lambda e, i_=i_: self._view_bone_field(i_))
+            ent.bind("<MouseWheel>", lambda e, i_=i_: self._view_bone_step(i_, e.delta > 0, e))
+            ent.bind("<Button-4>", lambda e, i_=i_: self._view_bone_step(i_, True, e))
+            ent.bind("<Button-5>", lambda e, i_=i_: self._view_bone_step(i_, False, e))
+            return cell, ent
+
+        # translation: three fields in a row
+        tk.Label(bones, text="Translation", bg=C["bg1"], fg=C["text3"], font=F["small"], anchor="w").pack(
+            fill="x", pady=(6, 1))
+        r_ = tk.Frame(bones, bg=C["bg1"])
+        r_.pack(fill="x")
+        for n, axis in enumerate("XYZ"):
+            cell, ent = field(r_, n)
+            cell.pack(side="left", fill="x", expand=True, padx=(0 if n == 0 else 4, 0))
+            tk.Label(cell, text=axis, bg=C["bg2"], fg=cols[n], font=F["bold"], padx=6).pack(side="left")
+            ent.pack(side="left", fill="x", expand=True, ipady=3)
+            tk.Frame(cell, bg=C["bg2"], width=4).pack(side="left")
+        # rotation: a slider and a field per axis
+        tk.Label(bones, text="Rotation", bg=C["bg1"], fg=C["text3"], font=F["small"], anchor="w").pack(
+            fill="x", pady=(8, 1))
+        self.view_rot = []
+        for n, axis in enumerate("XYZ"):
             r_ = tk.Frame(bones, bg=C["bg1"])
-            r_.pack(fill="x")
-            for n, axis in enumerate("XYZ"):
-                col = ("#ff3352", "#8bdc00", "#2890ff")[n]
-                cell = tk.Frame(r_, bg=C["bg2"], highlightthickness=1, highlightbackground=C["border2"],
-                                highlightcolor=C["accent"])
-                cell.pack(side="left", fill="x", expand=True, padx=(0 if n == 0 else 4, 0))
-                tk.Label(cell, text=axis, bg=C["bg2"], fg=col, font=F["bold"], padx=6).pack(side="left")
-                ent = tk.Entry(cell, textvariable=self.v_bone[first + n], bg=C["bg2"], fg=C["text1"], bd=0,
-                               relief="flat", insertbackground=C["accent"], font=F["mono_s"], width=7,
-                               justify="right", highlightthickness=0)
-                ent.pack(side="left", fill="x", expand=True, ipady=3)
-                if unit:
-                    tk.Label(cell, text=unit, bg=C["bg2"], fg=C["text3"], font=F["small"]).pack(side="left")
-                tk.Frame(cell, bg=C["bg2"], width=4).pack(side="left")
-                i_ = first + n
-                for seq in ("<Return>", "<KP_Enter>", "<FocusOut>"):
-                    ent.bind(seq, lambda e, i_=i_: self._view_bone_field(i_))
-                ent.bind("<MouseWheel>", lambda e, i_=i_: self._view_bone_step(i_, e.delta > 0, e))
-                ent.bind("<Button-4>", lambda e, i_=i_: self._view_bone_step(i_, True, e))
-                ent.bind("<Button-5>", lambda e, i_=i_: self._view_bone_step(i_, False, e))
+            r_.pack(fill="x", pady=1)
+            tk.Label(r_, text=axis, bg=C["bg1"], fg=cols[n], font=F["bold"], width=2).pack(side="left")
+            cell, ent = field(r_, 3 + n)
+            cell.pack(side="right")
+            ent.pack(side="left", ipady=2)
+            tk.Label(cell, text="°", bg=C["bg2"], fg=C["text3"], font=F["small"]).pack(side="left", padx=(0, 4))
+            sc = tk.Scale(r_, from_=-180, to=180, orient="horizontal", resolution=1, showvalue=False,
+                          bg=C["accent"], troughcolor=C["border2"], activebackground=C["accent_hover"],
+                          highlightthickness=0, bd=0, sliderrelief="flat", sliderlength=round(14 * SCALE),
+                          width=round(10 * SCALE), command=lambda v, n=n: self._view_bone_slider(n, float(v)))
+            sc.pack(side="left", fill="x", expand=True, padx=(0, 8), pady=4)
+            self.view_rot.append(sc)
         rr = tk.Frame(bones, bg=C["bg1"])
         rr.pack(fill="x", pady=(4, 6))
         Button(rr, "Reset rotation", lambda: self._view_reset_bone(rotation=True), **small).pack(side="left")
