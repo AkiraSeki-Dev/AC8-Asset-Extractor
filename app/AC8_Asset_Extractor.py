@@ -1182,10 +1182,10 @@ class App(tk.Tk):
             up = direction < 0
             if e.state & 0x0001:  # Shift: fly speed
                 sp = self.glv.change_fly_speed(1 if up else -1)
-                self.v_view_status.set(f"Fly speed ×{sp:.2f}  (Shift+wheel)")
+                self.v_view_status.set(f"Fly speed ×{sp:.2f}")
             elif e.state & (0x20000 if IS_WIN else 0x0008):  # Alt only (on Windows 0x0008 is Num Lock): field of view
                 fov = self.glv.change_fov(-1 if up else 1)
-                self.v_view_status.set(f"Field of view {fov:.0f}°  (Alt+wheel)")
+                self.v_view_status.set(f"Field of view {fov:.0f}°")
             else:
                 self.glv._wheel(-direction)
             return
@@ -3692,7 +3692,7 @@ class App(tk.Tk):
         self._view_tex_shown = None
         self.view_tex_preview.configure(image=self._blank_thumb(), text="Click a texture name to see it here.",
                                         cursor="")
-        self.v_view_tex_info.set("Open a part with ▸ to see its textures.")
+        self.v_view_tex_info.set("Expand a part to see its textures.")
 
     def _view_expand_all(self, on):
         for fn in getattr(self, "_view_folds", {}).values():
@@ -3709,8 +3709,7 @@ class App(tk.Tk):
         self._view_thumb_imgs = [img]
         self.view_tex_preview.configure(image=img, text="")
         w, h = m.image_sizes.get(ii, th.size)
-        self.v_view_tex_info.set(f"{m.image_names[ii]}\n{w} × {h}  ·  used as {role_name(role)} on {part}"
-                                 "\nClick the picture to open it bigger")
+        self.v_view_tex_info.set(f"{m.image_names[ii]}\n{w} × {h}  ·  {role_name(role)[4:].capitalize()}\nClick the picture to enlarge")
         self._view_tex_shown = (ii, role, part)
         self.view_tex_preview.configure(cursor="hand2")
         # only the preview box changes; the 3D view keeps its shading (MAP picks a texture view there)
@@ -4134,8 +4133,41 @@ class App(tk.Tk):
         except Exception as e:
             messagebox.showerror(APP_NAME, f"Couldn't save the screenshot:\n{e}")
 
-    FLY_HELP = "Free fly: move the mouse to look · W A S D move · Q down · E up · wheel forward/back · " \
-               "Shift+wheel speed · Alt+wheel field of view · left-click, Ctrl+F or Esc to stop"
+    FLY_HELP = "Free fly  ·  click or Esc to stop"
+    CONTROLS = (
+        ("Normal", (("Rotate", "Middle-drag  (or left-drag)"), ("Pan", "Shift + middle-drag  (or right-drag)"),
+                    ("Zoom", "Mouse wheel"), ("Frame the model", "F  or double-click"),
+                    ("Snap to a side", "Click a ball on the axis circle"),
+                    ("Rotate with the circle", "Drag the axis circle"))),
+        ("Free fly", (("Start / stop", "Ctrl + F  or  Shift + `"), ("Stop", "Left-click  or  Esc"),
+                      ("Look around", "Move the mouse"), ("Move", "W  A  S  D"), ("Down / up", "Q  /  E"),
+                      ("Forward / back", "Mouse wheel"), ("Faster", "Hold Shift"))),
+        ("Both", (("Fly speed", "Shift + mouse wheel"), ("Field of view", "Alt + mouse wheel"))),
+    )
+
+    def _view_controls(self):
+        if getattr(self, "_controls_win", None) is not None and self._controls_win.winfo_exists():
+            self._controls_win.lift()
+            return
+        w = tk.Toplevel(self, bg=C["bg0"])
+        self._controls_win = w
+        w.title("3D viewer controls")
+        w.transient(self)
+        w.resizable(False, False)
+        pad = tk.Frame(w, bg=C["bg0"], padx=22, pady=16)
+        pad.pack(fill="both", expand=True)
+        for i, (section, rows) in enumerate(self.CONTROLS):
+            tk.Label(pad, text=section.upper(), bg=C["bg0"], fg=C["accent"], font=F["small"]).grid(
+                row=100 * i, column=0, columnspan=2, sticky="w", pady=(0 if i == 0 else 14, 4))
+            for r, (what, how) in enumerate(rows, 1):
+                tk.Label(pad, text=what, bg=C["bg0"], fg=C["text3"], font=F["base"]).grid(
+                    row=100 * i + r, column=0, sticky="w", padx=(0, 24), pady=1)
+                tk.Label(pad, text=how, bg=C["bg0"], fg=C["text1"], font=F["bold"]).grid(
+                    row=100 * i + r, column=1, sticky="w", pady=1)
+        Button(pad, "Close", w.destroy, font=F["small"], padx=14, pady=4).grid(row=999, column=1, sticky="e",
+                                                                              pady=(16, 0))
+        w.bind("<Escape>", lambda e: w.destroy())
+        center_on(w, self)
 
     def _view_key(self, e):
         if self.tab != "viewer" or isinstance(self.focus_get(), tk.Entry) or self.glv is None:
@@ -4155,7 +4187,8 @@ class App(tk.Tk):
             self.glv.frame()
 
     def _view_fly_changed(self, on):
-        self.v_view_status.set(self.FLY_HELP if on else "Free fly off  ·  Ctrl+F (or Shift+`) to fly again")
+        m = self._view_model
+        self.v_view_status.set(self.FLY_HELP if on else (m.name if m is not None else ""))
 
     def _view_focus_out(self, e):
         if self.glv is None:
@@ -4182,7 +4215,8 @@ class App(tk.Tk):
         head.pack(fill="x", pady=(0, 8))
         small = dict(font=F["small"], padx=10, pady=3)
         # right: actions
-        Button(head, "Open in browser", self._viewer_in_browser, **small).pack(side="right")
+        Button(head, "Controls", self._view_controls, **small).pack(side="right")
+        Button(head, "Open in browser", self._viewer_in_browser, **small).pack(side="right", padx=(0, 6))
         Button(head, "Screenshot", self._view_screenshot, **small).pack(side="right", padx=(0, 6))
         Button(head, "Export textures…", self._view_export_dialog, variant="primary", **small).pack(
             side="right", padx=(0, 6))
@@ -4230,14 +4264,6 @@ class App(tk.Tk):
         self.view_panel_seg = Segmented(seg_row, self.v_view_panel, [("parts", "Parts"), ("bones", "Bones"),
                                                                    ("info", "Info")])
         self.view_panel_seg.pack(side="left")
-        tk.Label(inner, text="Middle-drag rotate · Shift+middle-drag pan · wheel zoom\n"
-                 "Left-drag rotates and right-drag pans too · F frame\n"
-                 "Axis circle: click a ball to snap, drag to rotate\n"
-                 "Ctrl+F or Shift+` free fly: mouse look\n"
-                 "W A S D move · Q down · E up\n"
-                 "Shift+wheel fly speed · Alt+wheel field of view",
-                 bg=C["bg1"], fg=C["text3"], font=F["small"], justify="left", anchor="w").pack(side="bottom",
-                                                                                                fill="x", pady=(8, 0))
         host = tk.Frame(inner, bg=C["bg1"])
         host.pack(fill="both", expand=True)
         # parts

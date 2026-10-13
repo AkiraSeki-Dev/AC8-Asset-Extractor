@@ -51,7 +51,7 @@ Open **Settings** (top right). An orange **Setup needed** bar tells you if anyth
 
 ## 3D viewer
 
-Open it with **View 3D** on an extraction or **Preview** in the catalog.
+Open it with **View 3D** on an extraction or **Preview** in the catalog. The **Controls** button in the viewer lists these too.
 
 | Action | How |
 | --- | --- |
