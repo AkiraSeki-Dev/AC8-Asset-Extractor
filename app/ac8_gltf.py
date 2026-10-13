@@ -24,7 +24,7 @@ import ac8_textures as at
 import ac8_vt as vt
 from ac8_package import Package
 
-GL_FLOAT, GL_UBYTE, GL_USHORT, GL_UINT = 5126, 5121, 5123, 5125
+GL_FLOAT, GL_USHORT, GL_UINT = 5126, 5123, 5125
 ARRAY_BUFFER, ELEMENT_ARRAY_BUFFER = 34962, 34963
 
 ROLE_BASE = {"C", "D", "BC", "CO", "BASECOLOR", "ALBEDO", "DIFFUSE", "COL", "COLOR", "A"}

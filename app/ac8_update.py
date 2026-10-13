@@ -1,6 +1,6 @@
 """Updating the app itself from its GitHub releases (https://github.com/AkiraSeki-Dev/AC8-Asset-Extractor).
 
-A release is tagged vX.Y and carries AC8_Asset_Extractor_vX.Y.zip (one "AC8 Asset Extractor" folder inside). Updating
+A release is tagged vX.Y.Z and carries AC8_Asset_Extractor_vX.Y.Z.zip (one "AC8 Asset Extractor" folder inside). Updating
 copies the new files over the app folder but never touches the user's own files: settings, asset list and history,
 exports, logs, the AES key and the unpacking tools (those have their own updater, see ac8_tools.py).
 """

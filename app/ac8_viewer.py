@@ -2,8 +2,8 @@
 
     python ac8_viewer.py <file.glb | folder> [more ...] [--first NAME] [--browser]
 
-The app uses ViewerServer directly and shows the page inside its own window (Edge in app mode, docked into the
-Viewer tab). Run on its own, this opens a pywebview window, or the web browser if pywebview isn't available.
+The app uses ViewerServer for its "Open in browser" button (its own 3D view is ac8_glview.py). Run on its own,
+this opens a pywebview window, or the web browser if pywebview isn't available.
 A small web server on 127.0.0.1 serves the viewer page and only the files it was given.
 """
 import base64

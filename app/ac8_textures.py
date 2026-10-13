@@ -16,14 +16,8 @@ from pathlib import Path
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # find the sibling ac8_* modules
-
-PACKAGE_TAG = b"\xc1\x83\x2a\x9e"
-
-# bulk data flags (EBulkDataFlags)
-BULK_INLINE = 0x40            # ForceInlinePayload: bytes sit right after the reference in .uexp
-BULK_SEPARATE_FILE = 0x100    # PayloadInSeperateFile: bytes in .ubulk (or .uptnl if optional)
-BULK_OPTIONAL = 0x800         # OptionalPayload: .uptnl
-BULK_SIZE64 = 0x2000
+from ac8_package import BULK_INLINE, BULK_OPTIONAL, BULK_SEPARATE_FILE  # noqa: E402  (bulk data flags)
+from ac8_package import read_data_resources as _read_resources  # noqa: E402
 
 # pixel format -> (block bytes or None for raw, Pillow decoder setup)
 BCN = {"PF_DXT1": (8, 1), "PF_DXT3": (16, 2), "PF_DXT5": (16, 3), "PF_BC4": (8, 4),
@@ -38,28 +32,11 @@ class TextureError(Exception):
 
 
 def read_data_resources(uasset: bytes):
-    """The data-resource table is the last block of a UE5.2+ cooked .uasset.
-
-    header: uint32 version, int32 count, then per entry:
-      uint32 flags, [uint32 cooked index - version 2+], int64 serial offset, int64 duplicate offset,
-      int64 serial size, int64 raw size, int32 outer index, uint32 legacy bulk-data flags
-    """
-    size = len(uasset)
-    for entry in (44, 48):
-        for count in range(1, 1024):
-            start = size - 8 - count * entry
-            if start < 0:
-                break
-            version, n = struct.unpack_from("<Ii", uasset, start)
-            if n != count or not 0 < version < 16 or (entry == 48) != (version >= 2):
-                continue
-            out = []
-            for i in range(count):
-                at = start + 8 + i * entry + (8 if entry == 48 else 4)
-                offset, dup, ssize, rsize, outer, legacy = struct.unpack_from("<qqqqiI", uasset, at)
-                out.append({"offset": offset, "size": ssize, "raw": rsize, "flags": legacy})
-            return out
-    raise TextureError("data resource table not found (not a UE5.2+ cooked package?)")
+    """The data-resource table (the last block of a UE5.2+ cooked .uasset): where each bulk payload lives."""
+    out = _read_resources(uasset)
+    if not out:
+        raise TextureError("data resource table not found (not a UE5.2+ cooked package?)")
+    return out
 
 
 def find_platform_data(uexp: bytes):

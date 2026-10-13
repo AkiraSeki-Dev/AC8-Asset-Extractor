@@ -29,7 +29,6 @@ NUMBER_FONT_PATH = "Live/Content/Vehicles/Aircraft/Common/Emblem/Number/T_Aircra
 FORMAT = 5  # 5: Tail_Color_Left/Right read as colours; 4: number placement from the decoded game shader; livery JSON version (2: game defaults, emblem placement, number scale/fonts; 3: number placement)
 # number areas -> UV1 tile row (same slot system as the emblems)
 NUMBER_AREAS = {"Tail": 0, "Body": 1, "Wing": 2}
-DEFAULT_Y = {"Tail": 0.24, "Body": 0.5, "Wing": 0.5}   # where in the slot the number sits (fitted, see numbers_of)
 # <Slot>DecalAreaIndex -> UV1 tile row it draws on (the game's defaults: Tail 0, WingBottom 1, Wing 2, FrontBody 3)
 AREA_ROWS = {k: -k for k in range(8)}  # the game's shader adds (0, AreaIndex) to UV1: area k draws on tile row -k
 

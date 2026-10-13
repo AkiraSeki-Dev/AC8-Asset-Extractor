@@ -8,9 +8,10 @@ from pathlib import Path
 
 TAG = 0x9E2A83C1
 
-BULK_INLINE = 0x40
-BULK_SEPARATE_FILE = 0x100
-BULK_OPTIONAL = 0x800
+# bulk data flags (EBulkDataFlags)
+BULK_INLINE = 0x40            # ForceInlinePayload: bytes sit right after the reference in .uexp
+BULK_SEPARATE_FILE = 0x100    # PayloadInSeperateFile: bytes in .ubulk (or .uptnl if optional)
+BULK_OPTIONAL = 0x800         # OptionalPayload: .uptnl
 
 
 class Reader:
@@ -37,21 +38,6 @@ class Reader:
     def u8(self):
         v = self.b[self.p]
         self.p += 1
-        return v
-
-    def u16(self):
-        v = struct.unpack_from("<H", self.b, self.p)[0]
-        self.p += 2
-        return v
-
-    def f32(self):
-        v = struct.unpack_from("<f", self.b, self.p)[0]
-        self.p += 4
-        return v
-
-    def f64(self):
-        v = struct.unpack_from("<d", self.b, self.p)[0]
-        self.p += 8
         return v
 
     def take(self, n):
@@ -130,7 +116,7 @@ class Package:
         self.exports = []
         n.p = export_off
         for _ in range(export_count):
-            cls, sup, tmpl, outer = n.i32(), n.i32(), n.i32(), n.i32()
+            cls, _super, _template, outer = n.i32(), n.i32(), n.i32(), n.i32()
             oname = self.name(n)
             oflags = n.u32()
             size, offset = n.i64(), n.i64()
@@ -223,7 +209,7 @@ def read_data_resources(uasset: bytes):
             out = []
             for i in range(count):
                 at = start + 8 + i * entry + (8 if entry == 48 else 4)
-                offset, dup, ssize, rsize, outer, legacy = struct.unpack_from("<qqqqiI", uasset, at)
+                offset, _dup, ssize, rsize, _outer, legacy = struct.unpack_from("<qqqqiI", uasset, at)
                 out.append({"offset": offset, "size": ssize, "raw": rsize, "flags": legacy})
             return out
     return []

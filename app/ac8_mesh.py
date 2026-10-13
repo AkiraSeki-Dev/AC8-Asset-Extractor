@@ -71,7 +71,7 @@ def read_static_vertex_buffer(r, n):
     """FStaticMeshVertexBuffer: tangents + UV channels."""
     r.skip(2)  # strip flags
     num_uv, nverts = r.i32(), r.i32()
-    full_uv, hi_tan = r.i32(), r.i32()
+    _full_uv, _hi_tan = r.i32(), r.i32()
     if nverts != n or not 0 < num_uv <= 8:
         raise MeshError(f"vertex buffer mismatch: {nverts} verts / {num_uv} uv (expected {n})")
     _e, _c, tan = read_bulk_array(r)
@@ -389,7 +389,7 @@ def read_skeletal_mesh(path):
     if not inlined:
         raise MeshError("LOD 0 is stored outside the package (not supported yet)")
     r.skip(2)  # strip flags
-    idx_size = r.u8()
+    _idx_size = r.u8()
     elem, count, raw = read_bulk_array(r)
     mesh.indices = np.frombuffer(raw, np.uint32 if elem == 4 else np.uint16).astype(np.uint32)
     _stride, n = r.i32(), r.i32()

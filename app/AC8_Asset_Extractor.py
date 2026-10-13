@@ -1,9 +1,12 @@
 """ACE Combat 8 Asset Extractor - browse the game's assets and extract them in one click.
 
-    1. Scan the game once (or import an existing listing) -> asset browser by category / group / type
-    2. Tick folders or single assets, press Extract
+    1. Scan the game once (or import an existing listing) -> asset browser by category / group / type, and the
+       Catalog (aircraft, characters, bosses … by name)
+    2. Select folders or single assets, press Extract
          Step 1  retoc (AC8 Unpacker tools)   game .utoc/.ucas -> raw .uasset/.uexp  (1_Raw_UAssets)
          Step 2  ac8_textures.py               raw textures     -> .png               (2_Final_Export/Textures)
+                 ac8_gltf.py / ac8_fbx.py      raw meshes       -> .glb / .fbx        (2_Final_Export/Meshes, FBX)
+    3. Look at the meshes in the 3D viewer (ac8_glview.py), with liveries for aircraft
 
 Every extraction gets its own folder, shown as a card:
 
@@ -12,7 +15,8 @@ Every extraction gets its own folder, shown as a card:
             1_Raw_UAssets/      what came out of the game paks
             2_Final_Export/
                 Textures/       .png, in the same folders as in the game
-            extraction_info.txt what was ticked, date, counts
+                Meshes/ FBX/    .glb / .fbx
+            extraction_info.txt what was selected, date, counts
             extraction_log.txt  full log
 
 Start it with "AC8 Asset Extractor.exe" (built from launcher/), or:  python AC8_Asset_Extractor.py
@@ -153,7 +157,6 @@ TEXTURE_CONVERTER = CODE / "ac8_textures.py"  # cooked texture -> PNG (incl. vir
 MESH_CONVERTER = CODE / "ac8_gltf.py"         # cooked static/skeletal mesh -> GLB with skeleton + textures
 FBX_CONVERTER = CODE / "ac8_fbx.py"           # GLB -> FBX, built in (no Blender needed)
 LIVERY_SCRIPT = CODE / "ac8_livery.py"         # aircraft liveries -> 2_Final_Export/Liveries/<aircraft>.json
-VIEWER_SCRIPT = CODE / "ac8_viewer.py"         # web viewer (only for "Open in browser")
 PBR_SCRIPT = CODE / "ac8_pbr.py"               # packed textures -> PBR maps + AO
 PREVIEW_DIR_NAME = "_Previews"
 MESH_FORMAT = "5"  # bump when the GLB output changes, so cached previews are rebuilt (5 = 2nd UV set for decals)
@@ -475,10 +478,6 @@ class AssetIndex:
         if raw[1:2] == b"\0":
             return raw.decode("utf-16-le", errors="replace")
         return raw.decode("utf-8", errors="replace")
-
-    @classmethod
-    def from_file(cls, path, source=None):
-        return cls(cls.parse_listing(cls.read_text_any(path)), source or str(path))
 
     def save(self, paths, path=INDEX_FILE, note=""):
         header = f"# {APP_NAME} asset index | {_dt.datetime.now():%Y-%m-%d %H:%M} | {note}\n"
@@ -838,7 +837,6 @@ class App(tk.Tk):
         self.history = load_history()  # {"updates": [{"date", "added": [keys], "removed": n}, ...]}
         self.tab = "assets"
         self.thumbs = {}           # path -> PhotoImage
-        self.tex_files = []
         self.scroll_canvases = []
         self.card_widgets = []
         self.folders = []
@@ -894,7 +892,7 @@ class App(tk.Tk):
         self.v_view_gear = tk.StringVar(value="down")
         self.v_view_probe = tk.StringVar(value="off")
         self.v_view_pylons = tk.StringVar(value="")
-        self._view_liv_data, self._view_liv_final, self._view_spec = None, None, None
+        self._view_liv_data, self._view_liv_final = None, None
         self.v_out_root = tk.StringVar(value=s.get("out_root", str(DEFAULT_OUT_ROOT)))
         self.v_step = tk.StringVar(value="Ready")
         self.v_status = tk.StringVar(value="")
@@ -3369,7 +3367,6 @@ class App(tk.Tk):
         self._view_att, self._view_liv_data, self._view_liv_final = att, data, final
         if not same:
             self.v_view_livery.set("")
-            self._view_spec = None
             self._ov_icon.pack_forget()
         opts = [("", "As exported")]
         for lv in (data or {}).get("custom", []):
@@ -4381,7 +4378,6 @@ class App(tk.Tk):
         self._ov_edit_btn.bind("<Button-1>", lambda e: self._ov_toggle_editor())
         body = tk.Frame(ov, bg=C["bg1"])
         body.pack(fill="x", padx=10, pady=(0, 9))
-        self._ov_body = body
 
         def toggle_body(_e=None):
             if body.winfo_ismapped():
@@ -4874,7 +4870,6 @@ class App(tk.Tk):
         role, q = self.v_tex_role.get(), self.v_tex_search.get().lower().strip()
         files = sorted(root.rglob("*.png"))
         files = [f for f in files if (role == "all" or texture_role_label(f) == role) and (not q or q in f.name.lower())]
-        self.tex_files = files
         limit = 240
         self.v_tex_count.set(f"{len(files)} texture(s)" + (f" — showing first {limit}" if len(files) > limit else ""))
         cols = 5

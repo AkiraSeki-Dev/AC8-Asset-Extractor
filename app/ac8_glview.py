@@ -472,7 +472,7 @@ def livery_spec(model, livery, final_dir, max_size=2048, atlas_cell=512, log=pri
                 1.0 if d.get("flip") else 0.0, float(d.get("area_row", d["row"])))
         if not slots:
             atlas = None
-    numbers = number_spec(livery.get("numbers"), font_sheet(livery.get("_font_png")), slot_bounds(model))
+    numbers = number_spec(livery.get("numbers"), font_sheet(livery.get("_font_png")))
     return {"mats": mats, "layers": layers, "atlas": atlas, "slots": slots, "missing": sorted(set(missing)),
             "numbers": numbers, "textures": textures}
 
@@ -579,53 +579,7 @@ def _runs(mask):
     return out
 
 
-def slot_bounds(model):
-    """Where each decal/number slot really is inside its UV1 tile: {(col, row): (u0, v0, u1, v1)}."""
-    import re as _re
-    lo, hi = {}, {}
-    for p in model.prims:
-        if p.uv1 is None or not _re.search(r"_Decal(\.10\d\d)?$", model.materials[p.mat].name):
-            continue
-        tri = p.uv1[p.idx.reshape(-1, 3).astype(np.int64)]
-        e1, e2 = tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0]
-        real = np.abs(e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0]) > 1e-7
-        tri = tri[real]
-        if not len(tri):
-            continue
-        tile = np.floor(tri.mean(1)).astype(int)
-        for key in {tuple(t) for t in tile}:
-            if key[0] not in (-1, 0) or not -4 <= key[1] <= 2:
-                continue
-            sel = (tile == key).all(1)
-            pts = tri[sel].reshape(-1, 2) - np.asarray(key, np.float32)
-            a, b = pts.min(0), pts.max(0)
-            lo[key] = np.minimum(lo.get(key, a), a)
-            hi[key] = np.maximum(hi.get(key, b), b)
-    out = {k: (float(lo[k][0]), float(lo[k][1]), float(hi[k][0]), float(hi[k][1])) for k in lo}
-    # the slot's real shape (a fin top is swept back, a wing slot is a trapezoid): 64x64 coverage per slot
-    masks = {}
-    n = 64
-    gx, gy = np.meshgrid((np.arange(n) + 0.5) / n, (np.arange(n) + 0.5) / n)
-    for p in model.prims:
-        if p.uv1 is None or not _re.search(r"_Decal(\.10\d\d)?$", model.materials[p.mat].name):
-            continue
-        tri = p.uv1[p.idx.reshape(-1, 3).astype(np.int64)]
-        tile = np.floor(tri.mean(1)).astype(int)
-        for t, key in zip(tri, map(tuple, tile)):
-            if key not in out:
-                continue
-            a, b, c = t - np.asarray(key, np.float32)
-            d = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1])
-            if abs(d) < 1e-9:
-                continue
-            l1 = ((b[1] - c[1]) * (gx - c[0]) + (c[0] - b[0]) * (gy - c[1])) / d
-            l2 = ((c[1] - a[1]) * (gx - c[0]) + (a[0] - c[0]) * (gy - c[1])) / d
-            inside = (l1 >= 0) & (l2 >= 0) & (l1 + l2 <= 1)
-            masks[key] = masks.get(key, np.zeros((n, n), bool)) | inside
-    return {k: v + (masks.get(k),) for k, v in out.items()}
-
-
-def number_spec(numbers, sheet, bounds=None):
+def number_spec(numbers, sheet):
     """The aircraft number exactly as the game's livery shader draws it (MP_*_Decal base pass pixel shader,
     decoded from the compiled game shader). Per area (row r = 0 tail, 1 nose, 2 wing) and side (UV1 tile column
     -1 = left, 0 = right):

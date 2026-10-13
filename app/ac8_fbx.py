@@ -36,10 +36,6 @@ class I64(int):
     pass
 
 
-class F64(float):
-    pass
-
-
 class Node:
     __slots__ = ("name", "props", "children")
 
