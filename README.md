@@ -120,6 +120,9 @@ AC8 Asset Extractor\
 
 ## Version history
 
+v1.2.6: the logo text at the top of the app (and of the 3D viewer page) is back to "ACE COMBAT 8" in capitals, to
+match the line under it.
+
 v1.2.5: small fixes.
 - Dropdown lists (e.g. the livery list) close when the app window is moved, resized or minimised, or when you
   click another program, instead of staying behind on the screen.
