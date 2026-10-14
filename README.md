@@ -105,7 +105,7 @@ The **DCS** tab has the tools for DCS World mods:
   minute. Where the DCS shell reaches past the AC8 one, the paint near the AC8 edge is stretched a little to cover
   it (the original texture's spill past the mesh edge isn't used); AC8's painted strap slots are closed up by
   stretching the paint beside them (the DCS helmet has its own strap fittings); **Move design up** lifts the
-  design to the DCS helmet's slightly higher brow edge.
+  front of the design so the name clears the DCS helmet's brow pad (the back moves up a little, to the DCS rim).
 
 ## Where things go
 

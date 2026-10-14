@@ -356,7 +356,10 @@ class HelmetMap:
     """Which point of the AC8 helmet each texel of the DCS helmet shell shows (worked out once per size)."""
     PAD = 8  # pixels painted past the shell's UV edges, so mipmaps don't pull in the old colours
 
-    RAISE = 0.66  # the DCS helmet's brow edge sits this much higher than the AC8 one (units of the meshes)
+    # how far the AC8 design is moved up on the DCS helmet (units of the meshes; y is up, the front is +x):
+    # at the front, enough for the name to clear the DCS helmet's brow pad (its letters are ~2.2 tall);
+    # at the back, the 0.66 the DCS rim sits higher there. In between it blends round the helmet.
+    RAISE = (2.2, 0.66)
     INSET = 0.35  # never sample closer than this to the AC8 shell's edge (the original paint spills past it)
     BAND = 2.0    # the strip inside the AC8 edge that is stretched a little to also cover where the DCS shell
     #               goes further (units of the meshes; the helmets are ~24 across)
@@ -368,7 +371,13 @@ class HelmetMap:
         Fd, FTd = m["dcs_f"], m["dcs_ft"]
         Va, Ta = m["ac8_v"].astype(np.float64), m["ac8_uv"].astype(np.float64)
         Fa, FTa = m["ac8_f"], m["ac8_ft"]
-        Va = Va + [0, raise_, 0]  # moves the AC8 design up on the DCS helmet (y is up)
+        front, back = (raise_, raise_) if np.isscalar(raise_) else raise_
+        mid_x, mid_z = Va[:, 0].mean(), Va[:, 2].mean()
+
+        def raise_at(p_):
+            """How far the design moves up at these DCS points: front … back, blended round the helmet."""
+            wf = (1 + np.cos(np.arctan2(p_[:, 2] - mid_z, p_[:, 0] - mid_x))) / 2  # 1 at the front, 0 at the back
+            return back + (front - back) * wf
         self.ac8_uv, self.ac8_ft = Ta, FTa
         # painted details of the AC8 helmet that the DCS helmet doesn't have (the strap slots and their rims),
         # in AC8 UV space: painted out before the transfer
@@ -423,13 +432,13 @@ class HelmetMap:
             L = np.stack([l0[ok], l1[ok], l2[ok]], 1)
             tri_d = Vd[Fd[f]]
             pts = L @ tri_d
+            pts = pts - np.outer(raise_at(pts), [0, 1, 0])  # the AC8 paint from this much lower shows here
             # the AC8 triangles near this DCS triangle
-            cd = tri_d.mean(0)
-            rd = np.linalg.norm(tri_d - cd, axis=1).max()
+            cd = pts.mean(0)
+            rd = np.linalg.norm(pts - cd, axis=1).max()
             cand = np.nonzero(np.linalg.norm(cen_a - cd, axis=1) <= rd + rad_a + reach)[0]
             if not len(cand):
                 cand = np.argsort(np.linalg.norm(cen_a - cd, axis=1))[:16]
-
             best_t, best_b, q = closest_on(cand, pts)
             # Near and past the AC8 shell's edge (handled after this loop, once it's known how far the DCS
             # shell reaches past each part of the edge): note where the points are relative to the edge
@@ -475,10 +484,23 @@ class HelmetMap:
             np.maximum.at(reach_e, je[o], -x[o])
         dd = np.linalg.norm(e_mid[:, None] - e_mid[None], axis=-1)
         reach_s = np.array([reach_e[dd[k] <= 1.5].max() for k in range(len(edge))])
+        # none at the front (±55°): the name sits close to the edge there, and what the DCS shell has past the AC8
+        # edge at the front is behind its brow pad; full from ±80° round to the back
+        e_ang = np.degrees(np.abs(np.arctan2(e_mid[:, 2] - mid_z, e_mid[:, 0] - mid_x)))
+        ramp = np.clip((e_ang - 55) / 25, 0, 1)
+        band_e = self.INSET + (self.BAND - self.INSET) * ramp * ramp * (3 - 2 * ramp)
         for cand, idx, base, u, x, je in jobs:
-            D = reach_s[je]
+            # blended from the nearby parts of the edge, so neighbouring texels never jump (no seams)
+            wgt = np.exp(-(np.linalg.norm(base[:, None, :] - e_mid[None], axis=-1) / 0.8) ** 2) + 1e-12
+            wgt /= wgt.sum(1, keepdims=True)
+            D, band = wgt @ reach_s, wgt @ band_e
+            keep = x < band
+            if not keep.all():
+                idx, base, u, x, je, D, band = idx[keep], base[keep], u[keep], x[keep], je[keep], D[keep], band[keep]
+            if not len(idx):
+                continue
             xs_ = np.maximum(x, -D)
-            s_ = self.INSET + (xs_ + D) * (self.BAND - self.INSET) / (self.BAND + D)
+            s_ = self.INSET + (xs_ + D) * (band - self.INSET) / (band + D)
             t2, b2, _ = closest_on(cand, base + u * s_[:, None])
             tri_a_all[idx], bar_a_all[idx] = t2, b2
         log(f"Helmet: the DCS shell reaches up to {reach_s.max():.2f} past the AC8 edge; that strip is stretched")
@@ -642,8 +664,8 @@ def main(argv):
     for k in ("ac8-color", "ac8-normal", "ac8-mro", "dcs-color", "dcs-normal", "dcs-roughmet"):
         p.add_argument("--" + k)
     p.add_argument("--format", choices=["png", "tga", "dds"])
-    p.add_argument("--raise", dest="raise_", type=float, default=HelmetMap.RAISE,
-                   help="move the AC8 design up on the DCS helmet (0 = as lined up)")
+    p.add_argument("--raise", dest="raise_", default=",".join(map(str, HelmetMap.RAISE)),
+                   help="move the AC8 design up on the DCS helmet: FRONT[,BACK] (0 = as lined up)")
     a = ap.parse_args(argv)
 
     def log(msg):
@@ -654,7 +676,8 @@ def main(argv):
         reformat(a.folder, a.format, log)
         return 0
     return 0 if helmet(a.out, a.ac8_color, a.ac8_normal, a.ac8_mro, a.dcs_color, a.dcs_normal, a.dcs_roughmet,
-                       a.format, a.raise_, log) else 1
+                       a.format, tuple(float(v) for v in (a.raise_ + "," + a.raise_).split(",")[:2])
+                       if "," in a.raise_ else float(a.raise_), log) else 1
 
 
 if __name__ == "__main__":
