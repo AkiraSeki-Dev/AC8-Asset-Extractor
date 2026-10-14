@@ -561,15 +561,19 @@ class HelmetMap:
                         out[y, lo:hi, c] = np.interp(src, np.arange(w), img[y, :, c])
         return out
 
-    def _base(self, path, channels, fill):
+    def _base(self, path, channels):
+        """The DCS helmet's own map to paint the shell into, or (without one) a transparent image, so the shell
+        drops straight onto a layer in Photoshop."""
         if path:
             im = Image.open(path).convert({3: "RGB", 4: "RGBA"}[channels])
             if im.size != (self.size, self.size):
                 im = im.resize((self.size, self.size), Image.LANCZOS)
             return np.asarray(im, dtype=np.float32).copy()
-        return np.broadcast_to(np.array(fill, np.float32), (self.size, self.size, channels)).copy()
+        return np.zeros((self.size, self.size, 4), np.float32)
 
     def _paint(self, base, values):
+        if base.shape[2] == 4 and values.shape[1] == 3:  # opaque shell on a transparent image
+            values = np.concatenate([values, np.full((len(values), 1), 255, np.float32)], 1)
         out = base
         out[self.pix[:, 1], self.pix[:, 0]] = values
         out = np.clip(out + 0.5, 0, 255).astype(np.uint8)
@@ -593,12 +597,14 @@ class HelmetMap:
         return im.convert("RGB") if im.mode == "RGBA" and im.getextrema()[3][0] == 255 else im
 
     def color(self, ac8_color, dcs_color=None):
-        return self._paint(self._base(dcs_color, 4, (128, 128, 128, 255)), self._sample(ac8_color))
+        col = self._sample(ac8_color)
+        col[:, 3] = 255  # the shell is opaque (AC8 colour maps can carry other data in alpha)
+        return self._paint(self._base(dcs_color, 4), col)
 
     def roughmet(self, ac8_mro, dcs_roughmet=None):
         """AC8 _MRO (R metallic, G roughness, B AO) -> DCS Roughmet (R AO, G roughness, B metallic)."""
         mro = self._sample(ac8_mro)
-        return self._paint(self._base(dcs_roughmet, 3, (255, 200, 0)), mro[:, [2, 1, 0]])
+        return self._paint(self._base(dcs_roughmet, 3), mro[:, [2, 1, 0]])
 
     def normal(self, ac8_normal, dcs_normal=None):
         """AC8 normal map (DirectX) -> the DCS shell's directions (DirectX)."""
@@ -618,7 +624,7 @@ class HelmetMap:
         world = x[:, None] * rot(Ta) + y[:, None] * rot(Ba) + z[:, None] * Nd
         n = np.stack([(world * Td).sum(1), (world * Bd).sum(1), (world * Nd).sum(1)], 1)
         n /= np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-12)
-        return self._paint(self._base(dcs_normal, 3, (128, 128, 255)), (n * 0.5 + 0.5) * 255)
+        return self._paint(self._base(dcs_normal, 3), (n * 0.5 + 0.5) * 255)
 
 
 def helmet(out, ac8_color=None, ac8_normal=None, ac8_mro=None, dcs_color=None, dcs_normal=None,

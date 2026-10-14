@@ -144,6 +144,9 @@ AC8 Asset Extractor\
 
 ## Version history
 
+v1.3.4: the F/A-18 helmet converter leaves everything around the shell transparent when no DCS texture is given,
+so the result drops straight onto a layer in Photoshop.
+
 v1.3.3: the F/A-18 helmet converter moves the front of the design up more, so the name clears the DCS helmet's
 brow pad (the back stays where it was); nothing is stretched at the front any more, so the name keeps its shape.
 
