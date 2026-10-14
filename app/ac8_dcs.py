@@ -397,6 +397,7 @@ class HelmetMap:
     RAISE = 1.55  # at the front: how far above the DCS rim the AC8 rim lands (units of the meshes, ~24 across)
     INSET = 0.35  # the AC8 rim used is this far inside its edge (the original paint spills past the edge)
     GRID = 3072   # resolution of the AC8 shell's lookup image
+    BAND = 240    # texels (at 4096) of each row stretched sideways to fill a gap at its end
     SPREAD = 2    # how locally the pull follows the nearest bit of rim (higher: more local)
     FADE = (0.2, 0.7)  # the pull is full this far in from the rim, then fades out over this much (radians)
 
@@ -632,9 +633,16 @@ class HelmetMap:
 
         log(f"Helmet: matching {len(pix):,} texels to the AC8 helmet…")
         n_all = len(pix)
-        uv_a = np.zeros((n_all, 2), np.float32)
-        tri_a_all = np.zeros(n_all, np.int32)
-        bar_a_all = np.zeros((n_all, 3), np.float32)
+
+        def front_only(phi):  # the warp is used across the front (the name); 0 from the corners of the face opening
+            t_ = np.clip((np.radians(52) - np.abs(phi)) / np.radians(12), 0, 1)
+            return t_ * t_ * (3 - 2 * t_)
+
+        # 1. where each DCS texel lands on the flattened AC8 shell: as lined up, plus the warp at the front
+        qx_all = np.zeros(n_all)
+        qy_all = np.zeros(n_all)
+        valid = np.zeros(n_all, bool)
+        keep = np.zeros(n_all, bool)
         for s0 in range(0, n_all, 500000):
             sl = slice(s0, s0 + 500000)
             pts = (bar_d_all[sl, :, None].astype(np.float64) * Vd[Fd[tri_d_all[sl]]]).sum(1)
@@ -646,9 +654,66 @@ class HelmetMap:
             ax, ay = (cxg - i0)[:, None], (cyg - j0)[:, None]
             dv = (D[j0, i0] * (1 - ax) * (1 - ay) + D[j0, i0 + 1] * ax * (1 - ay)
                   + D[j0 + 1, i0] * (1 - ax) * ay + D[j0 + 1, i0 + 1] * ax * ay)
-            qx, qy = px + dv[:, 0], py + dv[:, 1]
+            wf = front_only(phi)
+            qx, qy = px + dv[:, 0] * wf, py + dv[:, 1] * wf
+            gx = np.clip(np.round((qx + lim) * scale).astype(int), 0, self.GRID - 1)
+            gy = np.clip(np.round((qy + lim) * scale).astype(int), 0, self.GRID - 1)
+            # on the AC8 shell (INSET inside its edge), or at the front (behind the brow pad: its edge is used)
+            valid[sl] = inside[gy, gx] | (wf > 0.5)
+            qx_all[sl], qy_all[sl] = qx, qy
+            keep[sl] = wf > 0.02  # the front (the name) is never stretched sideways
+
+        # 2. where the DCS shell reaches past the AC8 one, the row is stretched sideways (in the DCS texture) to
+        # fill it: only side to side, never up or down
+        QX = np.zeros((H, W))
+        QY = np.zeros((H, W))
+        OK = np.zeros((H, W), bool)
+        SH = np.zeros((H, W), bool)
+        KP = np.zeros((H, W), bool)
+        KP[pix[:, 1], pix[:, 0]] = keep
+        QX[pix[:, 1], pix[:, 0]] = qx_all
+        QY[pix[:, 1], pix[:, 0]] = qy_all
+        OK[pix[:, 1], pix[:, 0]] = valid
+        SH[pix[:, 1], pix[:, 0]] = True
+        for y in np.nonzero(SH.any(1) & (SH & ~OK).any(1))[0]:
+            d = np.diff(np.r_[0, SH[y].astype(np.int8), 0])
+            for s_, e_ in zip(np.nonzero(d == 1)[0], np.nonzero(d == -1)[0] - 1):
+                xs_ok = s_ + np.nonzero(OK[y, s_:e_ + 1])[0]
+                if len(xs_ok) < 2:
+                    continue
+                a_, b_ = xs_ok[0], xs_ok[-1]
+                if a_ == s_ and b_ == e_:
+                    continue
+                width = e_ - s_ + 1
+                xs = np.arange(s_, e_ + 1, dtype=np.float64)
+                src = xs.copy()
+                kp = KP[y, s_:e_ + 1]
+                if a_ > s_:  # stretch [a_, a_ + band) over [s_, a_ + band), stopping short of the front
+                    band = min(max(3 * (a_ - s_), int(self.BAND * W / 4096)), width // 2)
+                    hit = np.nonzero(kp[a_ - s_:a_ - s_ + band])[0]
+                    band = int(hit[0]) if len(hit) else band
+                    m_ = xs < a_ + band
+                    src[m_] = a_ + (xs[m_] - s_) * band / (a_ + band - s_)
+                if b_ < e_:
+                    band = min(max(3 * (e_ - b_), int(self.BAND * W / 4096)), width // 2)
+                    hit = np.nonzero(kp[max(b_ - band + 1, s_) - s_:b_ - s_ + 1][::-1])[0]
+                    band = int(hit[0]) if len(hit) else band
+                    m_ = xs > b_ - band
+                    src[m_] = b_ - (e_ - xs[m_]) * band / max(e_ - (b_ - band), 1)
+                QX[y, s_:e_ + 1] = np.interp(src, xs_ok, QX[y, xs_ok])
+                QY[y, s_:e_ + 1] = np.interp(src, xs_ok, QY[y, xs_ok])
+        qx_all, qy_all = QX[pix[:, 1], pix[:, 0]], QY[pix[:, 1], pix[:, 0]]
+        del QX, QY, OK, SH, KP
+
+        # 3. read the AC8 UV (and triangle) there
+        uv_a = np.zeros((n_all, 2), np.float32)
+        tri_a_all = np.zeros(n_all, np.int32)
+        bar_a_all = np.zeros((n_all, 3), np.float32)
+        for s0 in range(0, n_all, 500000):
+            sl = slice(s0, s0 + 500000)
+            qx, qy = qx_all[sl], qy_all[sl]
             qph = np.arctan2(qy, qx)
-            qth = np.minimum(np.hypot(qx, qy), ray_at(qph))  # never off the AC8 shell (behind the brow pad: its edge)
+            qth = np.minimum(np.hypot(qx, qy), ray_at(qph))  # never off the AC8 shell
             gx = (qth * np.cos(qph) + lim) * scale
             gy = (qth * np.sin(qph) + lim) * scale
             x0 = np.clip(np.floor(gx).astype(int), 0, self.GRID - 2)
