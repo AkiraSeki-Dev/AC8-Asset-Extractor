@@ -144,6 +144,12 @@ AC8 Asset Extractor\
 
 ## Version history
 
+v1.3.2: the F/A-18 helmet converter stretches instead of filling.
+- Where the DCS shell reaches past the AC8 one (mostly the sides), the paint just inside the AC8 edge is stretched a
+  little to cover it - only there, so text near the edges stays intact.
+- The strap slots are closed up by stretching the paint beside them, so busy designs carry on with no smudged
+  patches. Every pixel comes from the AC8 texture.
+
 v1.3.1: a better F/A-18 helmet converter.
 - Paint that's off the AC8 helmet mesh (the original texture's spill past its edges) is no longer carried across,
   and past the AC8 rim the paint pattern carries on instead of being stretched into streaks.
