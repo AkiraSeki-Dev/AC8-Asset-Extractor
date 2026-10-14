@@ -397,6 +397,8 @@ class HelmetMap:
     RAISE = 1.55  # at the front: how far above the DCS rim the AC8 rim lands (units of the meshes, ~24 across)
     INSET = 0.35  # the AC8 rim used is this far inside its edge (the original paint spills past the edge)
     GRID = 3072   # resolution of the AC8 shell's lookup image
+    SPREAD = 2    # how locally the pull follows the nearest bit of rim (higher: more local)
+    FADE = (0.2, 0.7)  # the pull is full this far in from the rim, then fades out over this much (radians)
 
     def __init__(self, size=4096, data=HELMET_DATA, raise_=RAISE, log=print):
         m = np.load(data)
@@ -501,30 +503,93 @@ class HelmetMap:
             x = (phi + np.pi) / (2 * np.pi) * 2880 - 0.5
             return np.interp(x, np.arange(-1, 2881), np.r_[ray_lim[-1], ray_lim, ray_lim[0]])
 
-        # The warp, drawn flat: every point of the DCS rim (raised at the front) is paired with the nearest point of
-        # the AC8 rim (INSET inside its edge), so where the outlines differ the paint is pulled straight across to
-        # the DCS edge (sideways at the sides of the face opening, up at the brow). The pull is spread inward and
-        # fades out before the top; the band along the rim (the name) moves as one piece.
-        ph_e, th_e = angles(edge_points(Vd, Fd))
-        th_e = th_e - lift * front_weight(ph_e)
-        bd = np.unique(np.round(np.stack([th_e * np.cos(ph_e), th_e * np.sin(ph_e)], 1) * 400) / 400, axis=0)
+        def rim_loop(V, F):
+            """The shell's open edge as one ordered loop of points (the longest, if there are several)."""
+            _, wid = np.unique(np.round(V, 4), axis=0, return_inverse=True)
+            wid = wid.ravel()
+            pairs = np.array([[0, 1], [1, 2], [2, 0]])
+            ek = np.sort(wid[F[:, pairs]].reshape(-1, 2), axis=1)
+            uk, cnt = np.unique(ek, axis=0, return_counts=True)
+            pos = np.zeros((wid.max() + 1, 3))
+            pos[wid] = V
+            nbr = {}
+            for u, v in uk[cnt == 1]:
+                nbr.setdefault(u, []).append(v)
+                nbr.setdefault(v, []).append(u)
+            loops, seen = [], set()
+            for start in nbr:
+                if start in seen:
+                    continue
+                loop, prev, cur = [start], None, start
+                seen.add(start)
+                while True:
+                    nxt = [n for n in nbr[cur] if n != prev and (n not in seen or (n == start and len(loop) > 2))]
+                    if not nxt or nxt[0] == start:
+                        break
+                    prev, cur = cur, nxt[0]
+                    loop.append(cur)
+                    seen.add(cur)
+                loops.append(loop)
+            loop = max(loops, key=len)
+            return pos[loop]
+
+        def flat_loop(P, raise_front):
+            ph_, th_ = angles(P)
+            if raise_front:
+                th_ = th_ - lift * front_weight(ph_)
+            return np.stack([th_ * np.cos(ph_), th_ * np.sin(ph_)], 1)
+
+        def resample(L, n):
+            L2 = np.r_[L, L[:1]]
+            seg = np.linalg.norm(np.diff(L2, axis=0), axis=1)
+            cum = np.r_[0, np.cumsum(seg)]
+            t = np.linspace(0, cum[-1], n, endpoint=False)
+            return np.stack([np.interp(t, cum, L2[:, 0]), np.interp(t, cum, L2[:, 1])], 1)
+
+        def arrange(L):
+            """Start the loop at the middle of the front and run it round towards +phi."""
+            ph_ = np.arctan2(L[:, 1], L[:, 0])
+            L = np.roll(L, -int(np.argmin(np.abs(ph_) + 10 * (np.hypot(L[:, 0], L[:, 1]) > 1.8))), axis=0)
+            if np.arctan2(L[5, 1], L[5, 0]) < np.arctan2(L[0, 1], L[0, 0]):
+                L = np.r_[L[:1], L[1:][::-1]]
+            return L
+
+        def anchors(L):
+            """Matching points round the loop (indices): the corners of the face opening, and elsewhere fixed
+            directions, so away from the corners the pull is straight out (no sideways shift of the design)."""
+            th_ = np.hypot(L[:, 0], L[:, 1])
+            ph_ = np.unwrap(np.arctan2(L[:, 1], L[:, 0]))
+            ph_ = ph_ - ph_[0]
+            over = np.nonzero(th_ > (th_[0] + th_.max()) / 2)[0]
+            c1, c2 = int(over[0]), int(over[-1])
+
+            def at(deg, lo, hi):
+                return lo + int(np.argmax(ph_[lo:hi] >= np.radians(deg)))
+            k = [0, at(25, 0, c1), c1]
+            k += [at(d, c1, c2) for d in (90, 120, 150, 180, 210, 240, 270)]
+            k += [c2, at(335, c2, len(L)), len(L)]
+            return k
+
+        # The warp, drawn flat: the DCS rim (raised at the front) is laid onto the AC8 rim (INSET inside its edge)
+        # by distance along them between matching points (the corners of the face opening, fixed directions
+        # elsewhere), so the paint is pulled straight across to the DCS edge with no bunching. The pull is spread
+        # inward and fades out before the top; the band along the rim (the name) moves as one piece.
+        N = 2400
+        bd = arrange(resample(flat_loop(rim_loop(Vd, Fd), True), N))
         contour = inside & ~(np.roll(inside, 1, 0) & np.roll(inside, -1, 0)
                              & np.roll(inside, 1, 1) & np.roll(inside, -1, 1))
         cy, cx = np.nonzero(contour)
         ba = np.stack([cx, cy], 1) / scale - lim
-        disp = np.zeros_like(bd)
-        for s0 in range(0, len(bd), 512):
-            d2 = ((bd[s0:s0 + 512, None] - ba[None]) ** 2).sum(2)
-            disp[s0:s0 + 512] = ba[np.argmin(d2, 1)] - bd[s0:s0 + 512]
-        # smooth the pairing along the rim (nearest points jump where the outlines turn differently)
-        sm_d = np.zeros_like(disp)
-        for s0 in range(0, len(bd), 512):
-            w_ = np.exp(-((bd[s0:s0 + 512, None] - bd[None]) ** 2).sum(2) / (2 * 0.03 ** 2))
-            sm_d[s0:s0 + 512] = (w_ @ disp) / w_.sum(1, keepdims=True)
-        tgt = bd + sm_d  # put the smoothed targets back on the AC8 rim (smoothing cuts inside corners)
-        for s0 in range(0, len(bd), 512):
-            d2 = ((tgt[s0:s0 + 512, None] - ba[None]) ** 2).sum(2)
-            disp[s0:s0 + 512] = ba[np.argmin(d2, 1)] - bd[s0:s0 + 512]
+        la = flat_loop(rim_loop(Va, Fa), False)
+        for s0 in range(0, len(la), 512):  # onto the inset edge
+            d2 = ((la[s0:s0 + 512, None] - ba[None]) ** 2).sum(2)
+            la[s0:s0 + 512] = ba[np.argmin(d2, 1)]
+        la = arrange(resample(la, N))
+        kd, ka = anchors(bd), anchors(la)
+        src = np.interp(np.arange(N), kd, ka)  # position along the AC8 loop for each DCS loop point
+        i0 = np.floor(src).astype(int) % N
+        fr = (src - np.floor(src))[:, None]
+        disp = la[i0] * (1 - fr) + la[(i0 + 1) % N] * fr - bd
         G = 384
         gx_, gy_ = np.meshgrid(np.linspace(-lim, lim, G), np.linspace(-lim, lim, G))
         cells = np.stack([gx_.ravel(), gy_.ravel()], 1)
@@ -532,13 +597,13 @@ class HelmetMap:
         dmin = np.zeros(len(cells))
         for s0 in range(0, len(cells), 2048):
             d2 = ((cells[s0:s0 + 2048, None] - bd[None]) ** 2).sum(2)
-            w_ = 1 / (d2 + 0.01 ** 2) ** 2
+            w_ = 1 / (d2 + 0.01 ** 2) ** self.SPREAD
             D[s0:s0 + 2048] = (w_ @ disp) / w_.sum(1, keepdims=True)
             dmin[s0:s0 + 2048] = np.sqrt(d2.min(1))
         c_th = np.hypot(cells[:, 0], cells[:, 1])
         c_ph = np.arctan2(cells[:, 1], cells[:, 0])
         outside = c_th >= rim_at(rim_d, c_ph) - lift * front_weight(c_ph)
-        fade = np.clip(1 - (dmin - 0.2) / 0.7, 0, 1)  # full within ~11 degrees of the rim, none ~50 degrees in
+        fade = np.clip(1 - (dmin - self.FADE[0]) / self.FADE[1], 0, 1)  # full by the rim, none towards the top
         fade = np.where(outside, 1.0, fade * fade * (3 - 2 * fade))
         D = (D * fade[:, None]).reshape(G, G, 2)
         gscale = (G - 1) / (2 * lim)
