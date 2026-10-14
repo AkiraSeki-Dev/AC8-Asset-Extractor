@@ -5681,6 +5681,11 @@ class App(tk.Tk):
         Dropdown(row, "Save as", self.v_helmet_fmt, [("same", "Same as the DCS files"), ("png", "PNG"),
                                                      ("tga", "TGA"), ("dds", "DDS  (compressed + mipmaps)")],
                  width=20).pack(side="left")
+        # the DCS helmet's brow edge is a little higher than the AC8 one: move the design up to match
+        self.v_helmet_raise = tk.StringVar(value=cfg.get("helmet_raise", "0.66"))
+        Dropdown(row, "Move design up", self.v_helmet_raise,
+                 [("0", "No"), ("0.33", "A little"), ("0.66", "To the DCS brow  (default)"), ("1.0", "More")],
+                 width=12).pack(side="left", padx=(6, 0))
         act2 = tk.Frame(f2, bg=C["bg1"])
         act2.pack(fill="x", pady=(10, 0))
         Button(act2, "Convert helmet", self.helmet_convert, variant="primary", icon="▶", padx=16).pack(side="left")
@@ -5859,8 +5864,8 @@ class App(tk.Tk):
                                                      / "DCS_Helmet")
         self.v_helmet_out.set(out)
         fmt = self.v_helmet_fmt.get()
-        self.dcs_cfg.update(helmet_out=out, helmet_fmt=fmt)
-        cmd = [console_python(), "-u", DCS_SCRIPT, "helmet", "--out", out]
+        self.dcs_cfg.update(helmet_out=out, helmet_fmt=fmt, helmet_raise=self.v_helmet_raise.get())
+        cmd = [console_python(), "-u", DCS_SCRIPT, "helmet", "--out", out, "--raise", self.v_helmet_raise.get()]
         for k, val in v.items():
             if val:
                 cmd += ["--" + k.replace("_", "-"), val]

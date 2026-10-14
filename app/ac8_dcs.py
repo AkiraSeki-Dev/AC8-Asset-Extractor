@@ -352,17 +352,47 @@ def _bilinear(img, x, y):
             + img[y1, x1] * fx * fy)
 
 
+def _fill_from(img, ok):
+    """Fill the texels where ok is False smoothly from the others (pull-push over an image pyramid)."""
+    levels = [(img * ok[..., None], ok.astype(np.float32))]
+    while min(levels[-1][1].shape) > 1:
+        c, wgt = levels[-1]
+        h, w = wgt.shape
+        h2, w2 = (h + 1) // 2, (w + 1) // 2
+        c = np.pad(c, ((0, h2 * 2 - h), (0, w2 * 2 - w), (0, 0)))
+        wgt = np.pad(wgt, ((0, h2 * 2 - h), (0, w2 * 2 - w)))
+        levels.append((c.reshape(h2, 2, w2, 2, -1).sum((1, 3)), wgt.reshape(h2, 2, w2, 2).sum((1, 3))))
+    up = levels[-1][0] / np.maximum(levels[-1][1], 1e-6)[..., None]
+    for c, wgt in reversed(levels[:-1]):
+        h, w = wgt.shape
+        coarse = np.repeat(np.repeat(up, 2, 0), 2, 1)[:h, :w]
+        known = wgt > 0
+        up = np.where(known[..., None], c / np.maximum(wgt, 1e-6)[..., None], coarse)
+    return np.where(ok[..., None], img, up)
+
+
 class HelmetMap:
     """Which point of the AC8 helmet each texel of the DCS helmet shell shows (worked out once per size)."""
     PAD = 8  # pixels painted past the shell's UV edges, so mipmaps don't pull in the old colours
 
-    def __init__(self, size=4096, data=HELMET_DATA, log=print):
+    RAISE = 0.66  # the DCS helmet's brow edge sits this much higher than the AC8 one (units of the meshes)
+    INSET = 0.35  # where the DCS shell goes past the AC8 one (rim, strap slots), sample this far inside it
+
+    def __init__(self, size=4096, data=HELMET_DATA, raise_=RAISE, log=print):
         m = np.load(data)
         self.size = W = H = size
         Vd, Td = m["dcs_v"].astype(np.float64), m["dcs_uv"].astype(np.float64)
         Fd, FTd = m["dcs_f"], m["dcs_ft"]
         Va, Ta = m["ac8_v"].astype(np.float64), m["ac8_uv"].astype(np.float64)
         Fa, FTa = m["ac8_f"], m["ac8_ft"]
+        Va = Va + [0, raise_, 0]  # moves the AC8 design up on the DCS helmet (y is up)
+        self.ac8_uv, self.ac8_ft = Ta, FTa
+        # painted details of the AC8 helmet that the DCS helmet doesn't have (the strap slots and their rims),
+        # in AC8 UV space: painted out before the transfer
+        self.paintout = None
+        if "ac8_paintout" in m:
+            n = int(m["ac8_paintout_size"][0])
+            self.paintout = np.unpackbits(m["ac8_paintout"])[:n * n].reshape(n, n).astype(bool)
         tris_a = Va[Fa]
         cen_a = tris_a.mean(1)
         rad_a = np.linalg.norm(tris_a - cen_a[:, None], axis=2).max(1)
@@ -394,15 +424,33 @@ class HelmetMap:
             cand = np.nonzero(np.linalg.norm(cen_a - cd, axis=1) <= rd + rad_a + reach)[0]
             if not len(cand):
                 cand = np.argsort(np.linalg.norm(cen_a - cd, axis=1))[:16]
-            # exact closest point on the 8 candidates whose centres are nearest (as a k-d tree would pick them)
-            k = min(8, len(cand))
-            dc = ((pts[:, None, :] - cen_a[cand][None]) ** 2).sum(-1)
-            near = cand[np.argpartition(dc, k - 1, axis=1)[:, :k]] if len(cand) > k else \
-                np.broadcast_to(cand, (len(pts), len(cand)))
-            bary, d2 = _closest_on_tris(pts[:, None, :], tris_a[near, 0], tris_a[near, 1], tris_a[near, 2])
-            kbest = d2.argmin(1)
-            r = np.arange(len(pts))
-            best_t, best_b = near[r, kbest], bary[r, kbest]
+
+            def closest(q_pts):
+                """exact closest point on the 8 candidates whose centres are nearest (as a k-d tree would pick)"""
+                k = min(8, len(cand))
+                dc = ((q_pts[:, None, :] - cen_a[cand][None]) ** 2).sum(-1)
+                near = cand[np.argpartition(dc, k - 1, axis=1)[:, :k]] if len(cand) > k else \
+                    np.broadcast_to(cand, (len(q_pts), len(cand)))
+                bary, d2 = _closest_on_tris(q_pts[:, None, :], tris_a[near, 0], tris_a[near, 1], tris_a[near, 2])
+                kb = d2.argmin(1)
+                r_ = np.arange(len(q_pts))
+                t_, b_ = near[r_, kb], bary[r_, kb]
+                return t_, b_, (b_[:, :, None] * tris_a[t_]).sum(1)
+            best_t, best_b, q = closest(pts)
+            # past the AC8 shell's edge (the rim, the strap slots): the closest point is on the edge, where the
+            # original texture bleeds off the mesh; stretched over the overhang it makes streaks. Mirror the
+            # overhang back inside the shell instead, so the paint carries on past the edge.
+            nrm = np.cross(tris_a[best_t, 1] - tris_a[best_t, 0], tris_a[best_t, 2] - tris_a[best_t, 0])
+            nrm /= np.maximum(np.linalg.norm(nrm, axis=1, keepdims=True), 1e-12)
+            off = q - pts
+            tang = off - nrm * (off * nrm).sum(1, keepdims=True)
+            tl = np.linalg.norm(tang, axis=1)
+            over = tl > 0.05
+            if over.any():
+                q2 = q[over] + tang[over] / tl[over, None] * (tl[over, None] + self.INSET)
+                t2, b2, _ = closest(q2)
+                best_t, best_b = best_t.copy(), best_b.copy()
+                best_t[over], best_b[over] = t2, b2
             pix.append(P[ok].astype(np.int32))
             uv_a.append((best_b[:, :, None] * Ta[FTa[best_t]]).sum(1).astype(np.float32))
             tri_as.append(best_t.astype(np.int32))
@@ -438,9 +486,28 @@ class HelmetMap:
         return self._frames
 
     def _sample(self, path):
-        img = np.asarray(Image.open(path).convert("RGBA"), dtype=np.float32)
+        img = self._clean(np.asarray(Image.open(path).convert("RGBA"), dtype=np.float32))
         h, w = img.shape[:2]
         return _bilinear(img, self.uv_a[:, 0] * w - 0.5, (1 - self.uv_a[:, 1]) * h - 0.5)
+
+    def _clean(self, img):
+        """Only the paint that is really on the AC8 shell: texels outside its UV triangles (the original texture
+        bleeds past the mesh edge), a thin band along that edge, and the painted strap slots (the DCS helmet has
+        its own strap fittings elsewhere) are refilled from the paint around them."""
+        from PIL import ImageDraw
+        h, w = img.shape[:2]
+        cov = Image.new("L", (w, h), 0)
+        d = ImageDraw.Draw(cov)
+        T = self.ac8_uv
+        for tri in self.ac8_ft:
+            d.polygon([(T[i, 0] * w, (1 - T[i, 1]) * h) for i in tri], fill=255)
+        ok = np.asarray(cov) > 0
+        for _ in range(max(2, round(w / 256))):  # ~16 texels at 4096
+            ok = ok & np.roll(ok, 1, 0) & np.roll(ok, -1, 0) & np.roll(ok, 1, 1) & np.roll(ok, -1, 1)
+        if self.paintout is not None:
+            po = np.asarray(Image.fromarray(self.paintout.astype(np.uint8) * 255).resize((w, h), Image.BILINEAR)) > 0
+            ok &= ~po
+        return _fill_from(img, ok)
 
     def _base(self, path, channels, fill):
         if path:
@@ -503,12 +570,12 @@ class HelmetMap:
 
 
 def helmet(out, ac8_color=None, ac8_normal=None, ac8_mro=None, dcs_color=None, dcs_normal=None,
-           dcs_roughmet=None, fmt=None, log=print):
+           dcs_roughmet=None, fmt=None, raise_=HelmetMap.RAISE, log=print):
     """The helmet converter. The DCS files (optional) keep everything but the shell; the results get their
     names (and format, unless fmt is given). Returns the paths written."""
     out = Path(out)
     size = next((max(Image.open(p).size) for p in (dcs_color, dcs_normal, dcs_roughmet) if p), 4096)
-    hm = HelmetMap(size, log=log)
+    hm = HelmetMap(size, raise_=raise_, log=log)
     written = []
     for src, base, default, fn, kind in ((ac8_color, dcs_color, "pilot_F18_helmet", hm.color, "color"),
                                          (ac8_mro, dcs_roughmet, "pilot_F18_helmet_Roughmet", hm.roughmet, "data"),
@@ -545,6 +612,8 @@ def main(argv):
     for k in ("ac8-color", "ac8-normal", "ac8-mro", "dcs-color", "dcs-normal", "dcs-roughmet"):
         p.add_argument("--" + k)
     p.add_argument("--format", choices=["png", "tga", "dds"])
+    p.add_argument("--raise", dest="raise_", type=float, default=HelmetMap.RAISE,
+                   help="move the AC8 design up on the DCS helmet (0 = as lined up)")
     a = ap.parse_args(argv)
 
     def log(msg):
@@ -555,7 +624,7 @@ def main(argv):
         reformat(a.folder, a.format, log)
         return 0
     return 0 if helmet(a.out, a.ac8_color, a.ac8_normal, a.ac8_mro, a.dcs_color, a.dcs_normal, a.dcs_roughmet,
-                       a.format, log) else 1
+                       a.format, a.raise_, log) else 1
 
 
 if __name__ == "__main__":
