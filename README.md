@@ -87,6 +87,23 @@ button (bottom right of the view) lists all of these.
 - **Screenshot** saves a PNG of the view (without its buttons) next to the model.
 - Posing bones only changes what the viewer shows; exported files keep the model's original pose.
 
+## DCS World page
+
+The **DCS** tab has the tools for DCS World mods:
+
+- **Texture converter**, four ways:
+  - **AC8 → PBR:** an extraction's textures → standard PBR maps (Blender / Substance, Unreal, Unity, glTF).
+  - **AC8 → DCS:** an extraction's textures → DCS sets: `<name>` (colour + alpha), `<name>_Roughmet` (R AO · G
+    roughness · B metallic), `<name>_Normal` (DirectX).
+  - **PBR → DCS:** any PBR maps (BaseColor, Metallic, Roughness, AO or ORM, Normal, Opacity) → DCS sets.
+  - **DCS → PBR:** DCS sets → BaseColor (+ Opacity), Metallic, Roughness, AO (or ORM) and a normal map.
+
+  Pick an extraction (AC8 modes) or any folder, and **Save as** DDS (compressed, with mipmaps), PNG or TGA.
+- **F/A-18 pilot helmet (AC8 → DCS):** moves an Ace Combat 8 pilot helmet's colour, normal and metal/rough maps
+  onto the DCS F/A-18 helmet's UV layout. Pick the AC8 colour map (`T_…_Helmet…_C`); the others are found next to
+  it. Give the DCS helmet's own textures to keep its visor and straps (the results get their names). About a
+  minute.
+
 ## Where things go
 
 ```

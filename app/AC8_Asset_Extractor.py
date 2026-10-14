@@ -160,7 +160,8 @@ MESH_CONVERTER = CODE / "ac8_gltf.py"         # cooked static/skeletal mesh -> G
 FBX_CONVERTER = CODE / "ac8_fbx.py"           # GLB -> FBX, built in (no Blender needed)
 LIVERY_SCRIPT = CODE / "ac8_livery.py"         # aircraft liveries -> 2_Final_Export/Liveries/<aircraft>.json
 PBR_SCRIPT = CODE / "ac8_pbr.py"               # packed textures -> PBR maps + AO
-FONT_SCRIPT = CODE / "ac8_fonts.py"            # FontFace assets -> the original .ttf / .otf files
+FONT_SCRIPT = CODE / "ac8_fonts.py"
+DCS_SCRIPT = CODE / "ac8_dcs.py"               # PBR <-> DCS textures, DDS, the F/A-18 helmet converter            # FontFace assets -> the original .ttf / .otf files
 PREVIEW_DIR_NAME = "_Previews"
 MESH_FORMAT = "5"  # bump when the GLB output changes, so cached previews are rebuilt (5 = 2nd UV set for decals)
 PBR_PRESETS = [("off", "Off"), ("separate", "Separate maps (Blender / Substance)"), ("unreal", "Unreal (ORM)"),
@@ -1021,6 +1022,7 @@ class App(tk.Tk):
         self.v_pbr_auto = tk.StringVar(value=s.get("pbr_auto", "separate"))      # separate maps (Blender / Substance)
         self.v_pbr_preset = tk.StringVar(value=s.get("pbr_preset", "separate"))
         self.v_pbr_normal = tk.StringVar(value=s.get("pbr_normal", "auto"))
+        self.dcs_cfg = dict(s.get("dcs", {}))  # the DCS page's folders and options
         self.settings_cat_width = int(s.get("catalog_list_width", 0) or 0)
         self._steam_prev = dict(s.get("steam_prev_launch", {}))  # localconfig.vdf -> launch options before ours
         self.v_keep_previews = tk.BooleanVar(value=bool(s.get("keep_previews", False)))  # off: wiped on quit
@@ -1186,7 +1188,7 @@ class App(tk.Tk):
         self.tabbar.pack(fill="x", padx=18, pady=(10, 0))
         self.tab_labels = {}
         for key, text in (("assets", "ASSETS"), ("catalog", "CATALOG"), ("textures", "TEXTURES"),
-                          ("viewer", "3D VIEWER")):
+                          ("viewer", "3D VIEWER"), ("dcs", "DCS")):
             lbl = tk.Label(self.tabbar, text=text, bg=C["bg0"], fg=C["text3"], font=F["section"], padx=14, pady=6,
                            cursor="hand2")
             lbl.pack(side="left")
@@ -1202,6 +1204,7 @@ class App(tk.Tk):
         self._build_browser()
         self._build_catalog()
         self._build_textures()
+        self._build_dcs()
         self._build_viewer_pane()
         self._build_extractions()
 
@@ -1952,7 +1955,7 @@ class App(tk.Tk):
                 "catalog_list_width": self._cat_list_width(),
                 "bake_size": self.v_bake_size.get(), "bake_normal": self.v_bake_normal.get(), "view_mode": self.v_view_mode.get() if not self.v_view_mode.get().startswith("tex_") else "lit", "view_grid": self.v_view_grid.get(),
                 "view_bg": self.v_view_bg.get(),
-                "keep_raw": self.v_keep_raw.get()}
+                "keep_raw": self.v_keep_raw.get(), "dcs": self.dcs_cfg}
         try:
             SETTINGS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except OSError:
@@ -2824,7 +2827,7 @@ class App(tk.Tk):
         if key != "viewer" and self.glv is not None:
             self.glv.set_fly(False)
         panes = {"assets": self.pane_assets, "catalog": self.pane_catalog, "textures": self.pane_textures,
-                 "viewer": self.pane_viewer}
+                 "viewer": self.pane_viewer, "dcs": self.pane_dcs}
         new = panes[key]
         want_extr = key != "viewer"  # the viewer gets the whole width
         if new is not self._left_pane or want_extr != self._extr_shown:
@@ -2851,6 +2854,8 @@ class App(tk.Tk):
         elif key == "textures":
             self._fill_tex_sources()
             self.load_textures()
+        elif key == "dcs":
+            self._dcs_fill_sources()
 
     def _scrollable(self, parent, bg):
         canvas = tk.Canvas(parent, bg=bg, highlightthickness=0, bd=0)
@@ -5569,6 +5574,308 @@ class App(tk.Tk):
             return f"✔ PBR maps written: {n}"
 
         self._start(work, "Making PBR maps…")
+
+    # ================================================================== DCS World page
+
+    DCS_MODES = [("ac8_pbr", "AC8 → PBR"), ("ac8_dcs", "AC8 → DCS"), ("pbr_dcs", "PBR → DCS"), ("dcs_pbr", "DCS → PBR")]
+    DCS_HELP = {
+        "ac8_pbr": "Ace Combat 8 textures (an extraction's PNGs) → standard PBR maps for Blender, Substance, Unreal, "
+                   "Unity or glTF. Packed maps are split: _MRO → Metallic / Roughness / AO, _NO → Normal + AO.",
+        "ac8_dcs": "Ace Combat 8 textures → DCS World sets: <name> (colour + alpha), <name>_Roughmet (R AO · G "
+                   "roughness · B metallic) and <name>_Normal (DirectX).",
+        "pbr_dcs": "PBR maps (BaseColor, Metallic, Roughness, AO or ORM, Normal, Opacity, Emissive) → DCS World sets. "
+                   "_Normal_OpenGL / _Normal_DirectX in a name wins over the setting. Subfolders are kept.",
+        "dcs_pbr": "DCS World sets (<name>, <name>_Roughmet, <name>_Normal) → BaseColor (+ Opacity), Metallic, "
+                   "Roughness, AO (or one ORM map) and a normal map in the convention you pick.",
+    }
+    HELMET_SLOTS = [  # key, label, side, the endings its set-mates have
+        ("ac8_color", "Colour  (_C)", "ac8", ("_c",)),
+        ("ac8_normal", "Normal  (_N)", "ac8", ("_n", "_no")),
+        ("ac8_mro", "Metal / rough  (_MRO)", "ac8", ("_mro", "_mrx")),
+        ("dcs_color", "Diffuse", "dcs", ("",)),
+        ("dcs_normal", "Normal  (_nm / _Normal)", "dcs", ("_nm", "_normal", "_n")),
+        ("dcs_roughmet", "Roughmet", "dcs", ("_roughmet", "_rm")),
+    ]
+
+    def _build_dcs(self):
+        self.v_dcs_count = tk.StringVar(value="")
+        frame, box = self._panel("DCS WORLD", self.v_dcs_count)
+        self.pane_dcs = frame
+        _c, page = self._scrollable(box, C["bg1"])
+        cfg = self.dcs_cfg
+        self.v_dcs_mode = tk.StringVar(value=cfg.get("mode", "ac8_dcs"))
+        self.v_dcs_src = tk.StringVar(value=cfg.get("src", ""))
+        self.v_dcs_out = tk.StringVar(value=cfg.get("out", ""))
+        self.v_dcs_extr = tk.StringVar(value="")
+        self.v_dcs_fmt = tk.StringVar(value=cfg.get("fmt", "dds"))
+        self.v_dcs_normal = tk.StringVar(value=cfg.get("normal", "opengl"))
+        self.v_dcs_orm = tk.StringVar(value=cfg.get("layout", "separate"))
+        self.v_dcs_help = tk.StringVar()
+
+        def section(title, note=""):
+            f = tk.Frame(page, bg=C["bg1"], padx=16)
+            f.pack(fill="x", pady=(14, 0))
+            tk.Label(f, text=title, bg=C["bg1"], fg=C["accent"], font=F["section"], anchor="w").pack(fill="x")
+            if note:
+                tk.Label(f, text=note, bg=C["bg1"], fg=C["text3"], font=F["small"], anchor="w", justify="left",
+                         wraplength=round(560 * SCALE)).pack(fill="x", pady=(2, 0))
+            return f
+
+        def path_row(parent, label, var, browse):
+            row = tk.Frame(parent, bg=C["bg1"])
+            row.pack(fill="x", pady=(6, 0))
+            tk.Label(row, text=label, bg=C["bg1"], fg=C["text3"], font=F["tiny"], width=8, anchor="w").pack(side="left")
+            Button(row, "Browse…", browse, font=F["small"], padx=10, pady=3).pack(side="right")
+            Input(row, var, placeholder="Pick a folder…", mono=True).pack(side="left", fill="x", expand=True,
+                                                                          padx=(0, 6))
+
+        # --- texture converter
+        f = section("TEXTURE CONVERTER")
+        Segmented(f, self.v_dcs_mode, self.DCS_MODES).pack(anchor="w", pady=(8, 0))
+        tk.Label(f, textvariable=self.v_dcs_help, bg=C["bg1"], fg=C["text3"], font=F["small"], anchor="w",
+                 justify="left", wraplength=round(560 * SCALE)).pack(fill="x", pady=(6, 0))
+        self.dcs_extr_row = tk.Frame(f, bg=C["bg1"])
+        self.dd_dcs_extr = Dropdown(self.dcs_extr_row, "Extraction", self.v_dcs_extr, [("", "—")], width=30,
+                                    command=self._dcs_pick_extraction)
+        self.dd_dcs_extr.pack(side="left")
+        tk.Label(self.dcs_extr_row, text="or pick any folder below", bg=C["bg1"], fg=C["text3"],
+                 font=F["small"]).pack(side="left", padx=(8, 0))
+        self.dcs_paths = tk.Frame(f, bg=C["bg1"])
+        self.dcs_paths.pack(fill="x")
+        path_row(self.dcs_paths, "INPUT", self.v_dcs_src, lambda: self._dcs_browse(self.v_dcs_src, True))
+        path_row(self.dcs_paths, "OUTPUT", self.v_dcs_out, lambda: self._dcs_browse(self.v_dcs_out, False))
+        self.dcs_opts = tk.Frame(f, bg=C["bg1"])
+        self.dcs_opts.pack(fill="x", pady=(8, 0))
+        self.dd_dcs_preset = Dropdown(self.dcs_opts, "Preset", self.v_pbr_preset,
+                                      [p for p in PBR_PRESETS if p[0] not in ("off", "dcs")], width=22)
+        self.dd_dcs_pbrnormal = Dropdown(self.dcs_opts, "Normal", self.v_pbr_normal, NORMAL_CONV, width=16)
+        self.dd_dcs_normal = Dropdown(self.dcs_opts, "Normals", self.v_dcs_normal,
+                                      [("opengl", "OpenGL  (Blender, Substance GL)"),
+                                       ("directx", "DirectX  (Unreal, Substance DX)")], width=8)
+        self.dd_dcs_layout = Dropdown(self.dcs_opts, "Maps", self.v_dcs_orm,
+                                      [("separate", "Separate maps"), ("orm", "One ORM map")], width=13)
+        self.dd_dcs_fmt = Dropdown(self.dcs_opts, "Save as", self.v_dcs_fmt, [], width=20)
+        act = tk.Frame(f, bg=C["bg1"])
+        act.pack(fill="x", pady=(10, 0))
+        Button(act, "Convert", self.dcs_convert, variant="primary", icon="▶", padx=16).pack(side="left")
+        Button(act, "Open output folder", lambda: self.v_dcs_out.get() and open_folder(Path(self.v_dcs_out.get())),
+               font=F["small"], padx=10, pady=3).pack(side="left", padx=(8, 0))
+
+        # --- helmet
+        f2 = section("F/A-18 PILOT HELMET  (AC8 → DCS)",
+                     "Moves an Ace Combat 8 pilot helmet's textures onto the DCS F/A-18 helmet's UV layout (the helmet "
+                     "shell). Pick the AC8 colour map: its normal and metal/rough maps are found next to it. Give the "
+                     "DCS helmet's own textures to keep its visor, straps and the rest (the results get their names).")
+        self.helmet_vars = {k: tk.StringVar(value="") for k, *_ in self.HELMET_SLOTS}
+        for side, title in (("ac8", "ACE COMBAT 8"), ("dcs", "DCS HELMET  (optional)")):
+            tk.Label(f2, text=title, bg=C["bg1"], fg=C["text2"], font=F["tiny"], anchor="w").pack(fill="x",
+                                                                                                 pady=(10, 2))
+            for key, label, s_, sufs in self.HELMET_SLOTS:
+                if s_ == side:
+                    self._helmet_row(f2, key, label, side)
+        self.v_helmet_out = tk.StringVar(value=cfg.get("helmet_out", ""))
+        self.v_helmet_fmt = tk.StringVar(value=cfg.get("helmet_fmt", "same"))
+        path_row(f2, "OUTPUT", self.v_helmet_out, lambda: self._dcs_browse(self.v_helmet_out, False))
+        row = tk.Frame(f2, bg=C["bg1"])
+        row.pack(fill="x", pady=(8, 0))
+        Dropdown(row, "Save as", self.v_helmet_fmt, [("same", "Same as the DCS files"), ("png", "PNG"),
+                                                     ("tga", "TGA"), ("dds", "DDS  (compressed + mipmaps)")],
+                 width=20).pack(side="left")
+        act2 = tk.Frame(f2, bg=C["bg1"])
+        act2.pack(fill="x", pady=(10, 0))
+        Button(act2, "Convert helmet", self.helmet_convert, variant="primary", icon="▶", padx=16).pack(side="left")
+        Button(act2, "Open output folder",
+               lambda: self.v_helmet_out.get() and open_folder(Path(self.v_helmet_out.get())),
+               font=F["small"], padx=10, pady=3).pack(side="left", padx=(8, 0))
+        tk.Frame(page, bg=C["bg1"], height=18).pack()
+
+        watch(page, self.v_dcs_mode, self._dcs_mode_changed)
+        self._dcs_mode_changed()
+
+    def _helmet_row(self, parent, key, label, side):
+        row = tk.Frame(parent, bg=C["bg1"])
+        row.pack(fill="x", pady=2)
+        tk.Label(row, text=label, bg=C["bg1"], fg=C["text2"], font=F["small"], width=24, anchor="w").pack(side="left")
+        x_ = tk.Label(row, text="✕", bg=C["bg1"], fg=C["text3"], font=F["small"], cursor="hand2", padx=6)
+        x_.pack(side="right")
+        x_.bind("<Button-1>", lambda e: self.helmet_vars[key].set(""))
+        Button(row, "…", lambda: self._helmet_pick(key, label, side), font=F["small"], padx=10, pady=2).pack(
+            side="right", padx=(6, 0))
+        shown = tk.Label(row, text="—", bg=C["bg2"], fg=C["text3"], font=F["mono_s"], anchor="w", padx=8, pady=4)
+        shown.pack(side="left", fill="x", expand=True)
+
+        def refresh():
+            p_ = self.helmet_vars[key].get()
+            shown.configure(text=Path(p_).name if p_ else "—", fg=C["text1"] if p_ else C["text3"])
+        watch(shown, self.helmet_vars[key], refresh)
+
+    def _helmet_pick(self, key, label, side):
+        start = self.dcs_cfg.get(f"helmet_dir_{side}") or str(HERE)
+        f = filedialog.askopenfilename(title=label, initialdir=start,
+                                       filetypes=[("Images", "*.png *.tga *.dds *.tif *.tiff"), ("All files", "*.*")])
+        if not f:
+            return
+        f = Path(f)
+        self.helmet_vars[key].set(str(f))
+        self.dcs_cfg[f"helmet_dir_{side}"] = str(f.parent)
+        for k2, _l, s2, sufs2 in self.HELMET_SLOTS:  # the rest of the set, if it's next to it
+            if s2 == side and k2 != key and not self.helmet_vars[k2].get():
+                sib = self._helmet_sibling(f, sufs2, side)
+                if sib and sib != f:
+                    self.helmet_vars[k2].set(str(sib))
+        if side == "ac8" and not self.v_helmet_out.get():
+            self.v_helmet_out.set(str(f.parent / "DCS_Helmet"))
+
+    @staticmethod
+    def _helmet_sibling(picked, suffixes, side):
+        """T_X_C.png -> T_X_N.png (or another pilot's T_Y_Helmet01_01_N.png: AC8 helmets share normal maps)."""
+        stem, low = picked.stem, picked.stem.lower()
+        for tail in ("_c", "_n", "_no", "_mro", "_mrx", "_nm", "_normal", "_roughmet", "_rm"):
+            if low.endswith(tail):
+                stem = stem[:-len(tail)]
+                break
+        files = [p for p in picked.parent.iterdir() if p.is_file() and p.suffix.lower() in
+                 (".png", ".tga", ".dds", ".tif", ".tiff")]
+        for suf in suffixes:
+            for p in files:
+                if p.stem.lower() == (stem + suf).lower():
+                    return p
+        if side == "ac8":
+            core = "_".join(stem.split("_")[2:]).lower()  # helmet01_01
+            for suf in suffixes:
+                for p in files:
+                    if core and p.stem.lower().endswith(core + suf):
+                        return p
+        return None
+
+    def _dcs_mode_changed(self):
+        mode = self.v_dcs_mode.get()
+        self.v_dcs_help.set(self.DCS_HELP[mode])
+        ac8 = mode.startswith("ac8")
+        if ac8:
+            self.dcs_extr_row.pack(fill="x", pady=(8, 0), before=self.dcs_paths)
+        else:
+            self.dcs_extr_row.pack_forget()
+        for w in self.dcs_opts.winfo_children():
+            w.pack_forget()
+        show = {"ac8_pbr": (self.dd_dcs_preset, self.dd_dcs_pbrnormal), "ac8_dcs": (self.dd_dcs_fmt,),
+                "pbr_dcs": (self.dd_dcs_normal, self.dd_dcs_fmt),
+                "dcs_pbr": (self.dd_dcs_layout, self.dd_dcs_normal, self.dd_dcs_fmt)}[mode]
+        for w in show:
+            w.pack(side="left", padx=(0, 6))
+        self.dd_dcs_normal.cap.configure(text="YOUR NORMALS" if mode == "pbr_dcs" else "NORMAL OUT")
+        fmts = [("png", "PNG"), ("tga", "TGA")]
+        if mode != "dcs_pbr":
+            fmts = [("dds", "DDS  (compressed + mipmaps)")] + fmts
+        self.dd_dcs_fmt.set_options(fmts)
+        self.dcs_cfg["mode"] = mode
+        if ac8:
+            self._dcs_fill_sources()
+        self._dcs_default_out()
+
+    def _dcs_fill_sources(self):
+        if not hasattr(self, "dd_dcs_extr"):
+            return
+        folders = self._tex_folders()
+        opts = [(str(f_), f_.name) for f_ in folders]
+        self.dd_dcs_extr.set_options(opts or [("", "— no textures exported yet —")])
+        self.v_dcs_count.set(f"{len(opts)} extraction(s) with textures" if opts else "")
+        if self.v_dcs_mode.get().startswith("ac8") and opts and not self.v_dcs_src.get():
+            self.v_dcs_extr.set(opts[0][0])
+            self._dcs_pick_extraction()
+
+    def _dcs_pick_extraction(self):
+        folder = self.v_dcs_extr.get()
+        if folder:
+            self.v_dcs_src.set(str(Path(folder) / FINAL_DIR_NAME / "Textures"))
+            self.v_dcs_out.set("")
+            self._dcs_default_out()
+
+    def _dcs_default_out(self):
+        """Fill the output folder from the input when it's empty (or still the automatic one)."""
+        src = self.v_dcs_src.get().strip()
+        if not src or (self.v_dcs_out.get() and self.v_dcs_out.get() != getattr(self, "_dcs_auto_out", None)):
+            return
+        p = Path(src)
+        mode = self.v_dcs_mode.get()
+        if mode.startswith("ac8") and p.name == "Textures" and p.parent.name == FINAL_DIR_NAME:
+            out = p.parent / ("DCS" if mode == "ac8_dcs" else f"PBR_{self.v_pbr_preset.get()}")
+        else:
+            out = p / ("DCS" if mode in ("ac8_dcs", "pbr_dcs") else "PBR")
+        self._dcs_auto_out = str(out)
+        self.v_dcs_out.set(str(out))
+
+    def _dcs_browse(self, var, is_input):
+        d = filedialog.askdirectory(title="Folder with the textures" if is_input else "Save into",
+                                    initialdir=var.get() or str(HERE))
+        if d:
+            var.set(d)
+            if is_input:
+                self.v_dcs_extr.set("")
+                self._dcs_default_out()
+
+    def dcs_convert(self):
+        mode = self.v_dcs_mode.get()
+        src, out = self.v_dcs_src.get().strip(), self.v_dcs_out.get().strip()
+        if not src or not Path(src).is_dir():
+            messagebox.showinfo(APP_NAME, "Pick the folder with the textures first.")
+            return
+        if not out:
+            self._dcs_default_out()
+            out = self.v_dcs_out.get().strip()
+        fmt, normal, orm = self.v_dcs_fmt.get(), self.v_dcs_normal.get(), self.v_dcs_orm.get() == "orm"
+        self.dcs_cfg.update(src=src, out=out, fmt=fmt, normal=normal, layout=self.v_dcs_orm.get())
+        src, out = Path(src), Path(out)
+        label = dict(self.DCS_MODES)[mode]
+
+        def work():
+            if mode == "ac8_pbr":
+                n = self._step_pbr(src, out, self.v_pbr_preset.get(), self.v_pbr_normal.get())
+            elif mode == "ac8_dcs":
+                n = self._step_pbr(src, out, "dcs")
+                if fmt != "png" and n:
+                    self.post("step", f"Saving as {fmt.upper()}…")
+                    self.run_cmd([console_python(), "-u", DCS_SCRIPT, "reformat", out, "--format", fmt], HERE)
+            else:
+                self.post("step", f"{label}: converting…")
+                cmd = [console_python(), "-u", DCS_SCRIPT, "to-dcs" if mode == "pbr_dcs" else "to-pbr", src, out,
+                       "--format", fmt, "--normal", normal] + (["--orm"] if orm and mode == "dcs_pbr" else [])
+                code, _ = self.run_cmd(cmd, HERE)
+                if code not in (0, 1):
+                    raise RuntimeError(f"{label} failed (exit code {code}). See the log.")
+                n = sum(count_files(out, e) for e in (".png", ".tga", ".dds")) if out.exists() else 0
+            if n:
+                self.post("call", lambda: open_folder(out))
+            return f"✔ {label}: {n} file(s) in {out}" if n else f"{label}: nothing to convert in {src}"
+
+        self._start(work, f"{label}…")
+
+    def helmet_convert(self):
+        v = {k: (var.get() or None) for k, var in self.helmet_vars.items()}
+        if not any(v[k] for k in ("ac8_color", "ac8_normal", "ac8_mro")):
+            messagebox.showinfo(APP_NAME, "Pick at least one Ace Combat 8 helmet texture (the colour map _C).")
+            return
+        out = self.v_helmet_out.get().strip() or str(Path(v["ac8_color"] or v["ac8_normal"] or v["ac8_mro"]).parent
+                                                     / "DCS_Helmet")
+        self.v_helmet_out.set(out)
+        fmt = self.v_helmet_fmt.get()
+        self.dcs_cfg.update(helmet_out=out, helmet_fmt=fmt)
+        cmd = [console_python(), "-u", DCS_SCRIPT, "helmet", "--out", out]
+        for k, val in v.items():
+            if val:
+                cmd += ["--" + k.replace("_", "-"), val]
+        if fmt != "same":
+            cmd += ["--format", fmt]
+
+        def work():
+            self.post("step", "Helmet: moving the AC8 textures onto the DCS helmet (about a minute)…")
+            code, _ = self.run_cmd(cmd, HERE)
+            if code != 0:
+                raise RuntimeError(f"Helmet conversion failed (exit code {code}). See the log.")
+            self.post("call", lambda: open_folder(Path(out)))
+            return f"✔ Helmet done: {out}"
+
+        self._start(work, "Helmet…")
 
 
 class _Stop(Exception):
