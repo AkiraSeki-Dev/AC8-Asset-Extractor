@@ -635,7 +635,7 @@ class HelmetMap:
         n_all = len(pix)
 
         def front_only(phi):  # the warp is used across the front (the name); 0 from the corners of the face opening
-            t_ = np.clip((np.radians(52) - np.abs(phi)) / np.radians(12), 0, 1)
+            t_ = np.clip((np.radians(60) - np.abs(phi)) / np.radians(22), 0, 1)
             return t_ * t_ * (3 - 2 * t_)
 
         # 1. where each DCS texel lands on the flattened AC8 shell: as lined up, plus the warp at the front
@@ -661,49 +661,115 @@ class HelmetMap:
             # on the AC8 shell (INSET inside its edge), or at the front (behind the brow pad: its edge is used)
             valid[sl] = inside[gy, gx] | (wf > 0.5)
             qx_all[sl], qy_all[sl] = qx, qy
-            keep[sl] = wf > 0.02  # the front (the name) is never stretched sideways
+            keep[sl] = wf > 0.5  # the front (the name) stays exactly where the warp puts it
 
-        # 2. where the DCS shell reaches past the AC8 one, the row is stretched sideways (in the DCS texture) to
-        # fill it: only side to side, never up or down
-        QX = np.zeros((H, W))
-        QY = np.zeros((H, W))
+        # 2. where the DCS shell reaches past the AC8 one, the design near the edge is stretched out to fill it,
+        # straight across the edge in the DCS texture: a smooth offset field (solved on a coarse grid so there are
+        # no steps from row to row), the full offset at the shell's edge and none from BAND texels inside (or
+        # anywhere on the front, which stays put). Each texel then takes the AC8 spot of the texel it points at.
+        log("Helmet: stretching the design out to the DCS edge…")
+        QX = np.zeros((H, W), np.float32)
+        QY = np.zeros((H, W), np.float32)
         OK = np.zeros((H, W), bool)
-        SH = np.zeros((H, W), bool)
-        KP = np.zeros((H, W), bool)
-        KP[pix[:, 1], pix[:, 0]] = keep
         QX[pix[:, 1], pix[:, 0]] = qx_all
         QY[pix[:, 1], pix[:, 0]] = qy_all
         OK[pix[:, 1], pix[:, 0]] = valid
-        SH[pix[:, 1], pix[:, 0]] = True
-        for y in np.nonzero(SH.any(1) & (SH & ~OK).any(1))[0]:
-            d = np.diff(np.r_[0, SH[y].astype(np.int8), 0])
-            for s_, e_ in zip(np.nonzero(d == 1)[0], np.nonzero(d == -1)[0] - 1):
-                xs_ok = s_ + np.nonzero(OK[y, s_:e_ + 1])[0]
-                if len(xs_ok) < 2:
-                    continue
-                a_, b_ = xs_ok[0], xs_ok[-1]
-                if a_ == s_ and b_ == e_:
-                    continue
-                width = e_ - s_ + 1
-                xs = np.arange(s_, e_ + 1, dtype=np.float64)
-                src = xs.copy()
-                kp = KP[y, s_:e_ + 1]
-                if a_ > s_:  # stretch [a_, a_ + band) over [s_, a_ + band), stopping short of the front
-                    band = min(max(3 * (a_ - s_), int(self.BAND * W / 4096)), width // 2)
-                    hit = np.nonzero(kp[a_ - s_:a_ - s_ + band])[0]
-                    band = int(hit[0]) if len(hit) else band
-                    m_ = xs < a_ + band
-                    src[m_] = a_ + (xs[m_] - s_) * band / (a_ + band - s_)
-                if b_ < e_:
-                    band = min(max(3 * (e_ - b_), int(self.BAND * W / 4096)), width // 2)
-                    hit = np.nonzero(kp[max(b_ - band + 1, s_) - s_:b_ - s_ + 1][::-1])[0]
-                    band = int(hit[0]) if len(hit) else band
-                    m_ = xs > b_ - band
-                    src[m_] = b_ - (e_ - xs[m_]) * band / max(e_ - (b_ - band), 1)
-                QX[y, s_:e_ + 1] = np.interp(src, xs_ok, QX[y, xs_ok])
-                QY[y, s_:e_ + 1] = np.interp(src, xs_ok, QY[y, xs_ok])
-        qx_all, qy_all = QX[pix[:, 1], pix[:, 0]], QY[pix[:, 1], pix[:, 0]]
-        del QX, QY, OK, SH, KP
+        # fill the AC8 spots a little way past the valid area (nearest valid texel) so reads at its edge are clean
+        ys_, xs_ = pix[:, 1], pix[:, 0]
+        by0, by1 = max(ys_.min() - 40, 0), min(ys_.max() + 41, H)
+        bx0, bx1 = max(xs_.min() - 40, 0), min(xs_.max() + 41, W)
+        qx_b, qy_b, ok_b = QX[by0:by1, bx0:bx1], QY[by0:by1, bx0:bx1], OK[by0:by1, bx0:bx1].copy()
+        for _ in range(int(32 * W / 4096)):
+            grow = ~ok_b & (np.roll(ok_b, 1, 0) | np.roll(ok_b, -1, 0) | np.roll(ok_b, 1, 1) | np.roll(ok_b, -1, 1))
+            if not grow.any():
+                break
+            for axis, step in ((0, 1), (0, -1), (1, 1), (1, -1)):
+                take = grow & np.roll(ok_b, step, axis)
+                qx_b[take] = np.roll(qx_b, step, axis)[take]
+                qy_b[take] = np.roll(qy_b, step, axis)[take]
+                grow &= ~take
+                ok_b |= take
+
+        # the offset field on a coarse grid (cells of C texels)
+        C = max(W // 256, 1)
+        gh, gw = -(-H // C), -(-W // C)
+
+        def coarse(mask, frac):
+            m_ = np.zeros((gh * C, gw * C), np.float32)
+            m_[:H, :W] = mask
+            return m_.reshape(gh, C, gw, C).mean((1, 3)) > frac
+        SHc = np.zeros((H, W), bool)
+        SHc[ys_, xs_] = True
+        KPc = np.zeros((H, W), bool)
+        KPc[ys_, xs_] = keep
+        sh = coarse(SHc, 0.0)                 # cells touching the shell
+        ok_c = coarse(OK, 0.5) & sh           # cells that are mostly fine as they are
+        kp_c = coarse(KPc, 0.0)
+        del SHc, KPc
+
+        def nb_any(m_):
+            return np.roll(m_, 1, 0) | np.roll(m_, -1, 0) | np.roll(m_, 1, 1) | np.roll(m_, -1, 1)
+        edge = sh & nb_any(~sh)               # the shell's outline
+        # how far each cell is from the part that needs filling
+        far = sh & ~ok_c
+        dist = np.where(far, 0, 10 ** 6)
+        reach = far.copy()
+        band = max(int(round(self.BAND * W / 4096 / C)), 4)
+        for k in range(1, band + 1):
+            reach = (nb_any(reach) | reach) & sh
+            dist = np.where(reach & (dist > k), k, dist)
+        fixed0 = sh & ((dist >= band) | kp_c) & ~edge   # held still
+        # at the outline: point at the nearest fine cell (evened out along the outline)
+        ey, ex = np.nonzero(edge)
+        oy, ox = np.nonzero(ok_c & ~nb_any(~ok_c) | (ok_c & kp_c))
+        tgt = np.zeros((len(ey), 2))
+        if len(oy) and len(ey):
+            okp = np.stack([ox, oy], 1).astype(np.float64)
+            ep = np.stack([ex, ey], 1).astype(np.float64)
+            for s0 in range(0, len(ep), 256):
+                d2 = ((ep[s0:s0 + 256, None] - okp[None]) ** 2).sum(2)
+                tgt[s0:s0 + 256] = okp[np.argmin(d2, 1)] - ep[s0:s0 + 256]
+            sm_t = np.zeros_like(tgt)
+            for s0 in range(0, len(ep), 256):
+                w_ = np.exp(-((ep[s0:s0 + 256, None] - ep[None]) ** 2).sum(2) / (2 * 2.0 ** 2))
+                sm_t[s0:s0 + 256] = (w_ @ tgt) / w_.sum(1, keepdims=True)
+            tgt = sm_t
+        # cells on the outline that are themselves fine and held still don't move
+        Dx = np.zeros((gh, gw))
+        Dy = np.zeros((gh, gw))
+        Dx[ey, ex], Dy[ey, ex] = tgt[:, 0], tgt[:, 1]
+        hold = edge | fixed0
+        Dx[fixed0], Dy[fixed0] = 0, 0
+        free = sh & ~hold
+        # smooth in between (repeated neighbour averaging over the shell; outside cells mirror their neighbour)
+        nshs = [(axis, step, np.roll(sh, step, axis)) for axis, step in ((0, 1), (0, -1), (1, 1), (1, -1))]
+        cnt = np.maximum(sum(n_.astype(np.float64) for _, _, n_ in nshs), 1)
+        for _ in range(3 * band * band):
+            for D_ in (Dx, Dy):
+                acc = sum(np.where(n_, np.roll(D_, step, axis), 0) for axis, step, n_ in nshs)
+                D_[free] = (acc / cnt)[free]
+        # each texel's offset (in texels), then the AC8 spot it takes
+        gxp = (pix[:, 0] + 0.5) / C - 0.5
+        gyp = (pix[:, 1] + 0.5) / C - 0.5
+        i0 = np.clip(np.floor(gxp).astype(int), 0, gw - 2)
+        j0 = np.clip(np.floor(gyp).astype(int), 0, gh - 2)
+        fx_, fy_ = gxp - i0, gyp - j0
+
+        def bil(D_):
+            return (D_[j0, i0] * (1 - fx_) * (1 - fy_) + D_[j0, i0 + 1] * fx_ * (1 - fy_)
+                    + D_[j0 + 1, i0] * (1 - fx_) * fy_ + D_[j0 + 1, i0 + 1] * fx_ * fy_)
+        sx = np.clip(pix[:, 0] + bil(Dx) * C - bx0, 0, bx1 - bx0 - 1.001)
+        sy = np.clip(pix[:, 1] + bil(Dy) * C - by0, 0, by1 - by0 - 1.001)
+        moved = (np.abs(sx + bx0 - pix[:, 0]) > 0.01) | (np.abs(sy + by0 - pix[:, 1]) > 0.01)
+        a0, b0 = sx.astype(int), sy.astype(int)
+        ax_, ay_ = sx - a0, sy - b0
+
+        def bil2(I_):
+            return (I_[b0, a0] * (1 - ax_) * (1 - ay_) + I_[b0, a0 + 1] * ax_ * (1 - ay_)
+                    + I_[b0 + 1, a0] * (1 - ax_) * ay_ + I_[b0 + 1, a0 + 1] * ax_ * ay_)
+        qx_all = np.where(moved, bil2(qx_b), qx_all)
+        qy_all = np.where(moved, bil2(qy_b), qy_all)
+        del QX, QY, OK, qx_b, qy_b, ok_b
 
         # 3. read the AC8 UV (and triangle) there
         uv_a = np.zeros((n_all, 2), np.float32)

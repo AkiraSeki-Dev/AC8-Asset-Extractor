@@ -102,8 +102,8 @@ The **DCS** tab has the tools for DCS World mods:
 - **F/A-18 pilot helmet (AC8 → DCS):** moves an Ace Combat 8 pilot helmet's colour, normal and metal/rough maps
   onto the DCS F/A-18 helmet's UV layout. Pick the AC8 colour map (`T_…_Helmet…_C`); the others are found next to
   it. Give the DCS helmet's own textures to keep its visor and straps (the results get their names). About a
-  minute. Where the DCS shell reaches past the AC8 one at the sides, each row of the texture is stretched sideways
-  to fill it (never up or down; the original texture's spill past the mesh edge isn't used); AC8's painted strap slots are closed up by
+  minute or two. Where the DCS shell reaches past the AC8 one, the design near the edge is stretched smoothly out
+  to the DCS edge (the original texture's spill past the mesh edge isn't used); AC8's painted strap slots are closed up by
   stretching the paint beside them (the DCS helmet has its own strap fittings); **Move design up** lifts the
   front of the design so the name clears the DCS helmet's brow pad.
 
@@ -143,6 +143,10 @@ AC8 Asset Extractor\
   is about three times slower for aircraft textures.
 
 ## Version history
+
+v1.3.7: smoother edges from the F/A-18 helmet converter: the design is stretched out to the DCS helmet's edge with
+one smooth stretch instead of row by row, so busy designs (and UV checkers) no longer get stepped, wavy or bent
+cells along the edges.
 
 v1.3.6: the F/A-18 helmet converter keeps lettering straight (the back name's letters no longer wobble): each texel
 now reads the exact point on the AC8 helmet's surface.
