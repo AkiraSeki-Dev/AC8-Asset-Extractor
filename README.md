@@ -144,6 +144,9 @@ AC8 Asset Extractor\
 
 ## Version history
 
+v1.3.3: the F/A-18 helmet converter moves the front of the design up more, so the name clears the DCS helmet's
+brow pad (the back stays where it was); nothing is stretched at the front any more, so the name keeps its shape.
+
 v1.3.2: the F/A-18 helmet converter stretches instead of filling.
 - Where the DCS shell reaches past the AC8 one (mostly the sides), the paint just inside the AC8 edge is stretched a
   little to cover it - only there, so text near the edges stays intact.
