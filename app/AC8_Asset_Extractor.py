@@ -1003,6 +1003,7 @@ class App(tk.Tk):
         self.checked = set()    # ticked keys (folders or assets); never one inside another
         self._cat_rows = []     # catalog page rows, painted orange while selected
         self._mesh_deps = self._load_mesh_deps()  # mesh key -> materials / textures it uses
+        self._dep_keys = set()  # selected only because a selected model uses them
         self.partial = set()    # every folder that has something ticked inside it
         self._search_job = None
 
@@ -1639,10 +1640,11 @@ class App(tk.Tk):
 
     def clear_ticks(self):
         self.checked.clear()
+        self._dep_keys.clear()
         self._refresh_boxes()
 
-    def _selected_assets(self):
-        t = self.v_type.get()
+    def _selected_assets(self, t=None):
+        t = t or self.v_type.get()
         out = []
         for key in self.checked:
             out += self.index.assets_under(key, t)
@@ -1879,9 +1881,11 @@ class App(tk.Tk):
 
     # ---------------------------------------------------------- small helpers
 
-    def _describe_ticks(self):
-        """(short name for the folder, one-line description) of what is ticked."""
-        keys = sorted(self.checked)
+    def _describe_ticks(self, t=None):
+        """(short name for the folder, one-line description) of what is ticked. Materials / textures selected only
+        because a model uses them don't count for the name (else a pilot's outfit would be named after the
+        shared Base/Material folder)."""
+        keys = sorted(k for k in self.checked if k not in self._dep_keys) or sorted(self.checked)
         common = os.path.commonprefix([k.split("/") for k in keys]) if keys else []
         if len(keys) == 1:
             name, desc = keys[0].split("/")[-1].rsplit(".", 1)[0], keys[0]
@@ -1895,7 +1899,7 @@ class App(tk.Tk):
         short = catalog.export_name(keys)  # one aircraft / character: F18C, Joker1_Cope, NPC_XO …
         if short:
             name = short
-        t = self.v_type.get()
+        t = t or self.v_type.get()
         if t != "all":
             name += "_" + TYPE_LABEL[t].split(" ")[0]
         return safe_name(name), desc
@@ -2385,7 +2389,8 @@ class App(tk.Tk):
         self.post("log", f"✔ FBX: {fmt(n)} files in {fbx_dir}" if n else "  FBX: none written — see the lines above.")
         return n
 
-    def extract(self):
+    def extract(self, all_types=False):
+        """all_types: ignore the Type filter (the catalog's buttons: a model always comes with its textures)."""
         if not len(self.index):
             messagebox.showinfo(APP_NAME, "Scan the game or import a list first, then select what you want.")
             return
@@ -2398,8 +2403,8 @@ class App(tk.Tk):
         key = self._check_key()
         if not key:
             return
-        t = self.v_type.get()
-        assets = self._selected_assets()
+        t = "all" if all_types else self.v_type.get()
+        assets = self._selected_assets(t)
         if not assets:
             messagebox.showinfo(APP_NAME, f"None of the selected items contain {TYPE_LABEL[t].lower()}.")
             return
@@ -2408,7 +2413,7 @@ class App(tk.Tk):
                 APP_NAME, f"That's {fmt(len(assets))} assets. It will take a while and use a lot of disk space.\n\n"
                           "Continue?"):
             return
-        name, ticked = self._describe_ticks()
+        name, ticked = self._describe_ticks(t)
         items = sorted(self.checked)
         paks, keep_raw, fbx = self._paks_dir(), self.v_keep_raw.get(), self.v_fbx.get()
         folder = self._new_folder(name)
@@ -2418,6 +2423,9 @@ class App(tk.Tk):
         self._info_items = items
         self._write_info(folder, ticked, TYPE_LABEL[t], started=time.time())
         self._log(f"Extracting {fmt(len(assets))} assets with {len(filters)} filter(s) → {folder.name}")
+        if t != "all":
+            self._log(f"  Type filter is on: only {TYPE_LABEL[t].lower()} are extracted (Type → All types for "
+                      "everything)", "warn")
 
         def work():
             started = time.time()
@@ -3106,7 +3114,7 @@ class App(tk.Tk):
         """The page's Extract button: what's selected, or (with nothing selected) the whole entry."""
         if not self.checked:
             self._tick_keys(whole, True)
-        self.extract()
+        self.extract(all_types=True)
 
     def _cat_toggle(self, key, is_mesh=False):
         """Select / deselect a catalog row. A model brings the materials and textures it uses along
@@ -3116,9 +3124,11 @@ class App(tk.Tk):
             for k in [key] + deps:
                 if self._state(k) == "on":
                     self.toggle(k, refresh=False)
+            self._dep_keys -= set(deps)
             self._refresh_boxes()
             self.v_step.set(f"Deselected {key.rsplit('/', 1)[-1].rsplit('.', 1)[0]} — {self.v_sel.get()}")
             return
+        self._dep_keys |= {d for d in deps if self._state(d) != "on"}
         self._tick_keys([key] + deps, quiet=True)
         name = key.rsplit("/", 1)[-1].rsplit(".", 1)[0]
         if is_mesh and key not in self._mesh_deps:
@@ -3159,7 +3169,8 @@ class App(tk.Tk):
             DEPS_FILE.write_text(json.dumps({"index": len(self.index), "deps": self._mesh_deps}))
         except OSError:
             pass
-        add = [k for mk, ks in found.items() if self._state(mk) == "on" for k in ks]
+        add = [k for mk, ks in found.items() if self._state(mk) == "on" for k in ks if self._state(k) != "on"]
+        self._dep_keys |= set(add)
         if add:
             self._tick_keys(add, quiet=True)
 
@@ -3881,7 +3892,7 @@ class App(tk.Tk):
         self._log(f"Viewer: extracting the whole aircraft ({', '.join(keys)}) for its liveries")
         self.v_view_status.set("Extracting the whole aircraft… the viewer reopens it with its liveries when done.")
         self._view_reopen = Path(self.v_view_model.get()).stem
-        self.extract()
+        self.extract(all_types=True)
         if not (self.worker and self.worker.is_alive()):  # extract didn't start (setup / key missing)
             self._view_reopen = None
 
