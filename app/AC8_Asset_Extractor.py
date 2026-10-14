@@ -5681,12 +5681,12 @@ class App(tk.Tk):
         Dropdown(row, "Save as", self.v_helmet_fmt, [("same", "Same as the DCS files"), ("png", "PNG"),
                                                      ("tga", "TGA"), ("dds", "DDS  (compressed + mipmaps)")],
                  width=20).pack(side="left")
-        # the DCS helmet's brow pad covers the bottom of the AC8 name at the front: move the front of the design
-        # up (the back moves up a little, to the DCS rim there)
-        raise_opts = [("0,0", "No"), ("1.2,0.66", "A little"), ("2.2,0.66", "Name clear of the brow pad  (default)"),
-                      ("3.0,0.66", "More")]
-        saved = cfg.get("helmet_raise", "2.2,0.66")
-        self.v_helmet_raise = tk.StringVar(value=saved if saved in dict(raise_opts) else "2.2,0.66")
+        # the DCS helmet's brow pad covers the bottom of the AC8 name at the front: move the front of the design up
+        # (older settings were "FRONT,BACK" and fall back to the default)
+        raise_opts = [("0", "No"), ("0.8", "A little"), ("1.55", "Name clear of the brow pad  (default)"),
+                      ("2.2", "More")]
+        saved = cfg.get("helmet_raise", "1.55")
+        self.v_helmet_raise = tk.StringVar(value=saved if saved in dict(raise_opts) else "1.55")
         Dropdown(row, "Move design up", self.v_helmet_raise, raise_opts, width=12).pack(side="left", padx=(6, 0))
         act2 = tk.Frame(f2, bg=C["bg1"])
         act2.pack(fill="x", pady=(10, 0))
