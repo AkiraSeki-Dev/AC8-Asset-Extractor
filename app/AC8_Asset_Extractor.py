@@ -2852,8 +2852,13 @@ class App(tk.Tk):
         canvas.pack(side="left", fill="both", expand=True)
         inner = tk.Frame(canvas, bg=bg)
         win = canvas.create_window(0, 0, window=inner, anchor="nw")
-        inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.bind("<Configure>", lambda e: canvas.itemconfigure(win, width=e.width))
+
+        def region(_e=None):
+            # never smaller than the view: a short page then can't be scrolled (it used to slide down the window)
+            canvas.configure(scrollregion=(0, 0, canvas.winfo_width(),
+                                           max(inner.winfo_reqheight(), canvas.winfo_height())))
+        inner.bind("<Configure>", region)
+        canvas.bind("<Configure>", lambda e: (canvas.itemconfigure(win, width=e.width), region()))
         self.scroll_canvases.append(canvas)
         return canvas, inner
 
@@ -3020,9 +3025,13 @@ class App(tk.Tk):
             side="left", padx=(14, 0), pady=(4, 0))
         btns = tk.Frame(bar, bg=C["bg1"])
         btns.pack(fill="x", pady=(8, 0))
+        self._cat_extract_btn = None
         for text, cmd, variant in buttons:
-            Button(btns, text, cmd, variant=variant, font=F["small"], padx=10, pady=4).pack(side="left",
-                                                                                         padx=(0, 6))
+            b = Button(btns, text, cmd, variant=variant, font=F["small"], padx=10, pady=4)
+            b.pack(side="left", padx=(0, 6))
+            if text == "Extract now":
+                self._cat_extract_btn = b
+        self._cat_paint_rows()
         self.cat_head_line.pack(fill="x", after=self.cat_head)
         return bar
 
@@ -3089,6 +3098,15 @@ class App(tk.Tk):
         self._cat_rows = [e for e in self._cat_rows if e[0].winfo_exists()]
         for e in self._cat_rows:
             self._cat_paint_row(e)
+        b = getattr(self, "_cat_extract_btn", None)
+        if b is not None and b.winfo_exists():  # with something selected it extracts just that
+            b.set_text("Extract selected" if self.checked else "Extract now")
+
+    def _cat_extract(self, whole):
+        """The page's Extract button: what's selected, or (with nothing selected) the whole entry."""
+        if not self.checked:
+            self._tick_keys(whole, True)
+        self.extract()
 
     def _cat_toggle(self, key, is_mesh=False):
         """Select / deselect a catalog row. A model brings the materials and textures it uses along
@@ -3184,7 +3202,7 @@ class App(tk.Tk):
         meshes = a["meshes"]
         main = next((k for k, sec, _l in meshes if sec == "Airframe"), meshes[0][0] if meshes else None)
         btns = [("Select whole aircraft", lambda: self._tick_keys([fkey]), "default"),
-                ("Extract now", lambda: (self._tick_keys([fkey], True), self.extract()), "primary")]
+                ("Extract now", lambda: self._cat_extract([fkey]), "primary")]
         if main:
             fittings = [k for k, sec, _l in meshes if sec in ("Landing gear", "Refuel probe", "Special weapon pylons")
                         and k.rsplit("/", 1)[-1].startswith("SM_")]
@@ -3346,8 +3364,8 @@ class App(tk.Tk):
         new = self._latest_new()
         btns = [("Select all", lambda: self._tick_keys([ikey] if self.index.nodes.get(ikey) else it["keys"]),
                  "default"),
-                ("Extract now", lambda: (self._tick_keys([ikey] if self.index.nodes.get(ikey) else it["keys"], True),
-                                         self.extract()), "primary")]
+                ("Extract now", lambda: self._cat_extract([ikey] if self.index.nodes.get(ikey) else it["keys"]),
+                 "primary")]
         if meshes:
             btns.insert(0, ("Preview " + (f"first 30 of {len(meshes)} meshes" if len(meshes) > 30 else
                                           f"all {len(meshes)} mesh(es)"),
