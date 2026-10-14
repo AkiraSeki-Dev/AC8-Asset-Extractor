@@ -144,6 +144,9 @@ AC8 Asset Extractor\
 
 ## Version history
 
+v1.3.6: the F/A-18 helmet converter keeps lettering straight (the back name's letters no longer wobble): each texel
+now reads the exact point on the AC8 helmet's surface.
+
 v1.3.5: a cleaner F/A-18 helmet converter.
 - Where the DCS shell reaches past the AC8 one at the sides, the design is stretched sideways to fill it, with no
   curves, upward streaks or smeared edges.

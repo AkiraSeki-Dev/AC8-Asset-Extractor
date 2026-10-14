@@ -716,24 +716,36 @@ class HelmetMap:
             qth = np.minimum(np.hypot(qx, qy), ray_at(qph))  # never off the AC8 shell
             gx = (qth * np.cos(qph) + lim) * scale
             gy = (qth * np.sin(qph) + lim) * scale
-            x0 = np.clip(np.floor(gx).astype(int), 0, self.GRID - 2)
-            y0 = np.clip(np.floor(gy).astype(int), 0, self.GRID - 2)
-            fx, fy = (gx - x0)[:, None], (gy - y0)[:, None]
-            uv_a[sl] = (uv_img[y0, x0] * (1 - fx) * (1 - fy) + uv_img[y0, x0 + 1] * fx * (1 - fy)
-                        + uv_img[y0 + 1, x0] * (1 - fx) * fy + uv_img[y0 + 1, x0 + 1] * fx * fy)
-            tri = fid_img[np.clip(np.round(gy).astype(int), 0, self.GRID - 1),
-                          np.clip(np.round(gx).astype(int), 0, self.GRID - 1)]
-            tri = np.where(tri >= 0, tri, 0)
+            # the exact point on the AC8 triangle in this direction from the centre (the flat image only says
+            # which triangle - reading UVs from it bends straight lines a little at every triangle edge). Near an
+            # edge the image can name the neighbour, so the triangles a few pixels around are tried too.
+            dvec = np.stack([np.sin(qth) * np.cos(qph), np.cos(qth), np.sin(qth) * np.sin(qph)], 1)
+            best = np.full(len(dvec), -np.inf)
+            tri = np.zeros(len(dvec), np.int64)
+            bu = np.zeros(len(dvec))
+            bv = np.zeros(len(dvec))
+            ix, iy = np.round(gx).astype(int), np.round(gy).astype(int)
+            for ox, oy in ((0, 0), (2, 0), (-2, 0), (0, 2), (0, -2), (2, 2), (-2, -2), (2, -2), (-2, 2)):
+                t_ = fid_img[np.clip(iy + oy, 0, self.GRID - 1), np.clip(ix + ox, 0, self.GRID - 1)]
+                t_ = np.where(t_ >= 0, t_, 0)
+                A3, B3, C3 = Va[Fa[t_, 0]], Va[Fa[t_, 1]], Va[Fa[t_, 2]]
+                e1, e2, so = B3 - A3, C3 - A3, ctr - A3
+                pv = np.cross(dvec, e2)
+                det = (e1 * pv).sum(1)
+                det = np.where(np.abs(det) < 1e-12, 1e-12, det)
+                u_ = (so * pv).sum(1) / det
+                v_ = (dvec * np.cross(so, e1)).sum(1) / det
+                score = np.minimum(np.minimum(u_, v_), 1 - u_ - v_)  # >= 0 inside the triangle
+                take = score > best + 1e-9
+                best = np.where(take, score, best)
+                tri = np.where(take, t_, tri)
+                bu = np.where(take, u_, bu)
+                bv = np.where(take, v_, bv)
             tri_a_all[sl] = tri
-            # barycentrics of the UV within that AC8 triangle (for the normal maps' tangent frames)
-            tA, tB, tC = Ta[FTa[tri, 0]], Ta[FTa[tri, 1]], Ta[FTa[tri, 2]]
-            v0, v1, v2 = tB - tA, tC - tA, uv_a[sl].astype(np.float64) - tA
-            d00, d01, d11 = (v0 * v0).sum(1), (v0 * v1).sum(1), (v1 * v1).sum(1)
-            d20, d21 = (v2 * v0).sum(1), (v2 * v1).sum(1)
-            dn = np.where(np.abs(d00 * d11 - d01 * d01) < 1e-18, 1e-18, d00 * d11 - d01 * d01)
-            bv, bw = (d11 * d20 - d01 * d21) / dn, (d00 * d21 - d01 * d20) / dn
-            bb = np.clip(np.stack([1 - bv - bw, bv, bw], 1), 0, 1)
-            bar_a_all[sl] = bb / np.maximum(bb.sum(1, keepdims=True), 1e-9)
+            bb = np.clip(np.stack([1 - bu - bv, bu, bv], 1), 0, 1)
+            bb /= np.maximum(bb.sum(1, keepdims=True), 1e-9)
+            bar_a_all[sl] = bb
+            uv_a[sl] = (bb[:, :, None] * Ta[FTa[tri]]).sum(1)
         self.pix, self.uv_a = pix, uv_a
         self._geo = (Va, Ta, Fa, FTa, tri_a_all, bar_a_all, Vd, Td, Fd, FTd, tri_d_all, bar_d_all)
         self._frames = None
