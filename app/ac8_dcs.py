@@ -352,31 +352,14 @@ def _bilinear(img, x, y):
             + img[y1, x1] * fx * fy)
 
 
-def _fill_from(img, ok):
-    """Fill the texels where ok is False smoothly from the others (pull-push over an image pyramid)."""
-    levels = [(img * ok[..., None], ok.astype(np.float32))]
-    while min(levels[-1][1].shape) > 1:
-        c, wgt = levels[-1]
-        h, w = wgt.shape
-        h2, w2 = (h + 1) // 2, (w + 1) // 2
-        c = np.pad(c, ((0, h2 * 2 - h), (0, w2 * 2 - w), (0, 0)))
-        wgt = np.pad(wgt, ((0, h2 * 2 - h), (0, w2 * 2 - w)))
-        levels.append((c.reshape(h2, 2, w2, 2, -1).sum((1, 3)), wgt.reshape(h2, 2, w2, 2).sum((1, 3))))
-    up = levels[-1][0] / np.maximum(levels[-1][1], 1e-6)[..., None]
-    for c, wgt in reversed(levels[:-1]):
-        h, w = wgt.shape
-        coarse = np.repeat(np.repeat(up, 2, 0), 2, 1)[:h, :w]
-        known = wgt > 0
-        up = np.where(known[..., None], c / np.maximum(wgt, 1e-6)[..., None], coarse)
-    return np.where(ok[..., None], img, up)
-
-
 class HelmetMap:
     """Which point of the AC8 helmet each texel of the DCS helmet shell shows (worked out once per size)."""
     PAD = 8  # pixels painted past the shell's UV edges, so mipmaps don't pull in the old colours
 
     RAISE = 0.66  # the DCS helmet's brow edge sits this much higher than the AC8 one (units of the meshes)
-    INSET = 0.35  # where the DCS shell goes past the AC8 one (rim, strap slots), sample this far inside it
+    INSET = 0.35  # never sample closer than this to the AC8 shell's edge (the original paint spills past it)
+    BAND = 2.0    # the strip inside the AC8 edge that is stretched a little to also cover where the DCS shell
+    #               goes further (units of the meshes; the helmets are ~24 across)
 
     def __init__(self, size=4096, data=HELMET_DATA, raise_=RAISE, log=print):
         m = np.load(data)
@@ -394,10 +377,32 @@ class HelmetMap:
             n = int(m["ac8_paintout_size"][0])
             self.paintout = np.unpackbits(m["ac8_paintout"])[:n * n].reshape(n, n).astype(bool)
         tris_a = Va[Fa]
+        # the AC8 shell's open edge (edges used by one triangle only, with the UV seams welded)
+        _, wid = np.unique(np.round(Va, 4), axis=0, return_inverse=True)
+        wid = wid.ravel()
+        pairs = np.array([[0, 1], [1, 2], [2, 0]])
+        ekey = np.sort(wid[Fa[:, pairs]].reshape(-1, 2), axis=1)
+        epos = Va[Fa[:, pairs]].reshape(-1, 2, 3)
+        _, einv, ecount = np.unique(ekey, axis=0, return_inverse=True, return_counts=True)
+        edge = epos[ecount[einv.ravel()] == 1]
+        e_mid = edge.mean(1)
+        e_half = np.linalg.norm(edge[:, 1] - edge[:, 0], axis=1) / 2
         cen_a = tris_a.mean(1)
         rad_a = np.linalg.norm(tris_a - cen_a[:, None], axis=2).max(1)
         log(f"Helmet: matching the DCS shell to the AC8 one ({size}×{size})…")
-        pix, uv_a, tri_as, bar_as, tri_ds, bar_ds = [], [], [], [], [], []
+        pix, tri_as, bar_as, tri_ds, bar_ds, jobs, n_done = [], [], [], [], [], [], 0
+
+        def closest_on(cand, q_pts):
+            """exact closest point on the 8 candidates whose centres are nearest (as a k-d tree would pick them)"""
+            k = min(8, len(cand))
+            dc = ((q_pts[:, None, :] - cen_a[cand][None]) ** 2).sum(-1)
+            near = cand[np.argpartition(dc, k - 1, axis=1)[:, :k]] if len(cand) > k else \
+                np.broadcast_to(cand, (len(q_pts), len(cand)))
+            bary, d2 = _closest_on_tris(q_pts[:, None, :], tris_a[near, 0], tris_a[near, 1], tris_a[near, 2])
+            kb = d2.argmin(1)
+            r_ = np.arange(len(q_pts))
+            t_, b_ = near[r_, kb], bary[r_, kb]
+            return t_, b_, (b_[:, :, None] * tris_a[t_]).sum(1)
         reach = 2.5  # the shells are at most ~1.3 apart: candidates within this (plus the triangles' size)
         for f, (t0, t1, t2) in enumerate(FTd):
             uv = np.array([Td[t0], Td[t1], Td[t2]]) * [W, -H] + [0, H]  # pixels (v up -> rows down)
@@ -425,41 +430,61 @@ class HelmetMap:
             if not len(cand):
                 cand = np.argsort(np.linalg.norm(cen_a - cd, axis=1))[:16]
 
-            def closest(q_pts):
-                """exact closest point on the 8 candidates whose centres are nearest (as a k-d tree would pick)"""
-                k = min(8, len(cand))
-                dc = ((q_pts[:, None, :] - cen_a[cand][None]) ** 2).sum(-1)
-                near = cand[np.argpartition(dc, k - 1, axis=1)[:, :k]] if len(cand) > k else \
-                    np.broadcast_to(cand, (len(q_pts), len(cand)))
-                bary, d2 = _closest_on_tris(q_pts[:, None, :], tris_a[near, 0], tris_a[near, 1], tris_a[near, 2])
-                kb = d2.argmin(1)
-                r_ = np.arange(len(q_pts))
-                t_, b_ = near[r_, kb], bary[r_, kb]
-                return t_, b_, (b_[:, :, None] * tris_a[t_]).sum(1)
-            best_t, best_b, q = closest(pts)
-            # past the AC8 shell's edge (the rim, the strap slots): the closest point is on the edge, where the
-            # original texture bleeds off the mesh; stretched over the overhang it makes streaks. Mirror the
-            # overhang back inside the shell instead, so the paint carries on past the edge.
-            nrm = np.cross(tris_a[best_t, 1] - tris_a[best_t, 0], tris_a[best_t, 2] - tris_a[best_t, 0])
-            nrm /= np.maximum(np.linalg.norm(nrm, axis=1, keepdims=True), 1e-12)
-            off = q - pts
-            tang = off - nrm * (off * nrm).sum(1, keepdims=True)
-            tl = np.linalg.norm(tang, axis=1)
-            over = tl > 0.05
-            if over.any():
-                q2 = q[over] + tang[over] / tl[over, None] * (tl[over, None] + self.INSET)
-                t2, b2, _ = closest(q2)
-                best_t, best_b = best_t.copy(), best_b.copy()
-                best_t[over], best_b[over] = t2, b2
+            best_t, best_b, q = closest_on(cand, pts)
+            # Near and past the AC8 shell's edge (handled after this loop, once it's known how far the DCS
+            # shell reaches past each part of the edge): note where the points are relative to the edge
+            near_e = np.nonzero(np.linalg.norm(e_mid - cd, axis=1) <= rd + e_half + self.BAND + reach)[0]
+            if len(near_e):
+                nrm = np.cross(tris_a[best_t, 1] - tris_a[best_t, 0], tris_a[best_t, 2] - tris_a[best_t, 0])
+                nrm /= np.maximum(np.linalg.norm(nrm, axis=1, keepdims=True), 1e-12)
+                off = q - pts
+                tang = off - nrm * (off * nrm).sum(1, keepdims=True)
+                tl = np.linalg.norm(tang, axis=1)
+                over = tl > 0.02
+                a_, b_ = edge[near_e, 0], edge[near_e, 1]
+                ab = b_ - a_
+                t_ = np.clip(((q[:, None, :] - a_[None]) * ab[None]).sum(-1) / np.maximum((ab * ab).sum(-1), 1e-12),
+                             0, 1)
+                ep = a_[None] + t_[..., None] * ab[None]
+                ed = np.linalg.norm(q[:, None, :] - ep, axis=-1)
+                jj = ed.argmin(1)
+                r = np.arange(len(pts))
+                x = np.where(over, -tl, ed[r, jj])
+                todo = x < self.BAND
+                if todo.any():
+                    base = np.where(over[:, None], q, ep[r, jj])
+                    u = np.where(over[:, None], tang / np.maximum(tl, 1e-12)[:, None],
+                                 (q - ep[r, jj]) / np.maximum(ed[r, jj], 1e-12)[:, None])
+                    jobs.append((cand, n_done + np.nonzero(todo)[0], base[todo], u[todo], x[todo],
+                                 near_e[jj[todo]]))
             pix.append(P[ok].astype(np.int32))
-            uv_a.append((best_b[:, :, None] * Ta[FTa[best_t]]).sum(1).astype(np.float32))
             tri_as.append(best_t.astype(np.int32))
             bar_as.append(best_b.astype(np.float32))
             tri_ds.append(np.full(len(pts), f, np.int32))
             bar_ds.append(L.astype(np.float32))
+            n_done += len(pts)
+        tri_a_all, bar_a_all = np.concatenate(tri_as), np.concatenate(bar_as)
+        # How far the DCS shell reaches past each part of the AC8 edge (smoothed along the edge). There, the strip
+        # just inside the edge is stretched outward to cover it: distance x inside the edge (negative past it,
+        # down to -D) is sampled at INSET + (x + D) * (BAND - INSET) / (BAND + D) - unchanged at the strip's inner
+        # side, never closer than INSET to the edge, where the original paint spills off the mesh. Where the DCS
+        # shell doesn't reach past the edge (D = 0) the strip is only nudged in by INSET.
+        reach_e = np.zeros(len(edge))
+        for _c, _i, _b, _u, x, je in jobs:
+            o = x < 0
+            np.maximum.at(reach_e, je[o], -x[o])
+        dd = np.linalg.norm(e_mid[:, None] - e_mid[None], axis=-1)
+        reach_s = np.array([reach_e[dd[k] <= 1.5].max() for k in range(len(edge))])
+        for cand, idx, base, u, x, je in jobs:
+            D = reach_s[je]
+            xs_ = np.maximum(x, -D)
+            s_ = self.INSET + (xs_ + D) * (self.BAND - self.INSET) / (self.BAND + D)
+            t2, b2, _ = closest_on(cand, base + u * s_[:, None])
+            tri_a_all[idx], bar_a_all[idx] = t2, b2
+        log(f"Helmet: the DCS shell reaches up to {reach_s.max():.2f} past the AC8 edge; that strip is stretched")
         self.pix = np.concatenate(pix)
-        self.uv_a = np.concatenate(uv_a)
-        self._geo = (Va, Ta, Fa, FTa, np.concatenate(tri_as), np.concatenate(bar_as),
+        self.uv_a = (bar_a_all[:, :, None] * Ta[FTa[tri_a_all]]).sum(1).astype(np.float32)
+        self._geo = (Va, Ta, Fa, FTa, tri_a_all, bar_a_all,
                      Vd, Td, Fd, FTd, np.concatenate(tri_ds), np.concatenate(bar_ds))
         self._frames = None
         self.mask = np.zeros((H, W), bool)
@@ -491,23 +516,28 @@ class HelmetMap:
         return _bilinear(img, self.uv_a[:, 0] * w - 0.5, (1 - self.uv_a[:, 1]) * h - 0.5)
 
     def _clean(self, img):
-        """Only the paint that is really on the AC8 shell: texels outside its UV triangles (the original texture
-        bleeds past the mesh edge), a thin band along that edge, and the painted strap slots (the DCS helmet has
-        its own strap fittings elsewhere) are refilled from the paint around them."""
-        from PIL import ImageDraw
+        """Close up AC8's painted strap slots (the DCS helmet has its own strap fittings): row by row, the paint
+        on each side of a slot is stretched sideways over it, so the design carries on with no new pixels."""
+        if self.paintout is None:
+            return img
         h, w = img.shape[:2]
-        cov = Image.new("L", (w, h), 0)
-        d = ImageDraw.Draw(cov)
-        T = self.ac8_uv
-        for tri in self.ac8_ft:
-            d.polygon([(T[i, 0] * w, (1 - T[i, 1]) * h) for i in tri], fill=255)
-        ok = np.asarray(cov) > 0
-        for _ in range(max(2, round(w / 256))):  # ~16 texels at 4096
-            ok = ok & np.roll(ok, 1, 0) & np.roll(ok, -1, 0) & np.roll(ok, 1, 1) & np.roll(ok, -1, 1)
-        if self.paintout is not None:
-            po = np.asarray(Image.fromarray(self.paintout.astype(np.uint8) * 255).resize((w, h), Image.BILINEAR)) > 0
-            ok &= ~po
-        return _fill_from(img, ok)
+        po = np.asarray(Image.fromarray(self.paintout.astype(np.uint8) * 255).resize((w, h), Image.BILINEAR)) > 0
+        out = img.copy()
+        for y in np.nonzero(po.any(1))[0]:
+            row = po[y]
+            d = np.diff(np.concatenate([[0], row.astype(np.int8), [0]]))
+            for x0, x1 in zip(np.nonzero(d == 1)[0], np.nonzero(d == -1)[0]):
+                width = x1 - x0
+                xm = (x0 + x1) / 2
+                l0, r1 = max(x0 - width, 0), min(x1 + width, w)  # the paint beside the slot, as wide as the slot
+                for lo, hi, s_lo, s_hi in ((l0, int(np.ceil(xm)), l0, x0), (int(np.ceil(xm)), r1, x1, r1)):
+                    if hi <= lo or s_hi <= s_lo:
+                        continue
+                    xs = np.arange(lo, hi)
+                    src = s_lo + (xs - lo) * (s_hi - s_lo) / (hi - lo)  # stretch [s_lo, s_hi) over [lo, hi)
+                    for c in range(img.shape[2]):
+                        out[y, lo:hi, c] = np.interp(src, np.arange(w), img[y, :, c])
+        return out
 
     def _base(self, path, channels, fill):
         if path:
