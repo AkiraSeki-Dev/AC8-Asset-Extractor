@@ -102,7 +102,7 @@ The **DCS** tab has the tools for DCS World mods:
 - **F/A-18 pilot helmet (AC8 → DCS):** moves an Ace Combat 8 pilot helmet's colour, normal and metal/rough maps
   onto the DCS F/A-18 helmet's UV layout. Pick the AC8 colour map (`T_…_Helmet…_C`); the others are found next to
   it. Give the DCS helmet's own textures to keep its visor and straps (the results get their names). About a
-  minute. The whole design is stretched so the AC8 shell's edge lands on the DCS shell's edge all the way round
+  minute. The whole design is stretched straight across so the AC8 shell's edge lands on the DCS shell's edge
   (the original texture's spill past the mesh edge isn't used); AC8's painted strap slots are closed up by
   stretching the paint beside them (the DCS helmet has its own strap fittings); **Move design up** lifts the
   front of the design so the name clears the DCS helmet's brow pad.

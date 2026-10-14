@@ -388,13 +388,11 @@ def _rasterize(points2d, faces, values, grid, lo, hi):
 class HelmetMap:
     """Which point of the AC8 helmet each texel of the DCS helmet shell shows (worked out once per size).
 
-    Both shells are caps round the same centre. A point is described by its direction from the centre: azimuth
-    phi round the vertical axis (0 = the front) and polar angle theta from the top. Each shell's rim is a
-    theta per phi. Every DCS point is matched to the AC8 point at the same phi, with theta scaled so that the AC8
-    rim lands on the DCS rim: the whole design is stretched to the DCS shell's edge (no edge line is smeared
-    outward, no gaps). The scaling is spread over the middle of the shell, so the name near the rim keeps its
-    shape and only moves. At the front, the "rim" used for the DCS shell is raised (RAISE) so the name clears
-    the brow pad; below it (behind the pad) the AC8 paint just stops at its edge."""
+    Both shells are caps round the same centre and are drawn flat around their tops. Each point of the DCS
+    shell's edge is paired with the nearest point of the AC8 shell's edge, and that pull is spread inward and
+    fades out before the top: the design is stretched straight across to the DCS edge (sideways at the sides of
+    the face opening), with no edge line smeared outward and no gaps. At the front, the DCS edge used is raised
+    (RAISE) so the name clears the brow pad; below it (behind the pad) the AC8 paint just stops at its edge."""
     PAD = 8       # pixels painted past the shell's UV edges, so mipmaps don't pull in the old colours
     RAISE = 1.55  # at the front: how far above the DCS rim the AC8 rim lands (units of the meshes, ~24 across)
     INSET = 0.35  # the AC8 rim used is this far inside its edge (the original paint spills past the edge)
@@ -428,8 +426,8 @@ class HelmetMap:
             theta = np.arccos(np.clip(d[:, 1] / np.maximum(np.linalg.norm(d, axis=1), 1e-12), -1, 1))
             return phi, theta
 
-        def rim(V, F):
-            """theta of the shell's open edge for 720 directions round the helmet (smoothed)."""
+        def edge_points(V, F):
+            """Points along the shell's open edge (its boundary edges, each cut in 8)."""
             _, wid = np.unique(np.round(V, 4), axis=0, return_inverse=True)
             wid = wid.ravel()
             pairs = np.array([[0, 1], [1, 2], [2, 0]])
@@ -437,8 +435,11 @@ class HelmetMap:
             ep = V[F[:, pairs]].reshape(-1, 2, 3)
             _, inv, cnt = np.unique(ek, axis=0, return_inverse=True, return_counts=True)
             edge = ep[cnt[inv.ravel()] == 1]
-            pts_ = (edge[:, :1] + (edge[:, 1:] - edge[:, :1]) * np.linspace(0, 1, 9)[None, :, None]).reshape(-1, 3)
-            ph, th = angles(pts_)
+            return (edge[:, :1] + (edge[:, 1:] - edge[:, :1]) * np.linspace(0, 1, 9)[None, :, None]).reshape(-1, 3)
+
+        def rim(V, F):
+            """theta of the shell's open edge for 720 directions round the helmet (smoothed)."""
+            ph, th = angles(edge_points(V, F))
             bins = ((ph + np.pi) / (2 * np.pi) * 720).astype(int) % 720
             r = np.full(720, np.nan)
             for b in range(720):
@@ -456,8 +457,7 @@ class HelmetMap:
             x = (phi + np.pi) / (2 * np.pi) * 720 - 0.5
             return np.interp(x, np.arange(-1, 721), np.r_[r[-1], r, r[0]])
 
-        rim_d, rim_a = rim(Vd, Fd), rim(Va, Fa)
-        inset = self.INSET / radius
+        rim_d = rim(Vd, Fd)
         lift = raise_ / radius
 
         def front_weight(phi):  # 1 across the front (where the name is), 0 from the sides round to the back
@@ -501,6 +501,48 @@ class HelmetMap:
             x = (phi + np.pi) / (2 * np.pi) * 2880 - 0.5
             return np.interp(x, np.arange(-1, 2881), np.r_[ray_lim[-1], ray_lim, ray_lim[0]])
 
+        # The warp, drawn flat: every point of the DCS rim (raised at the front) is paired with the nearest point of
+        # the AC8 rim (INSET inside its edge), so where the outlines differ the paint is pulled straight across to
+        # the DCS edge (sideways at the sides of the face opening, up at the brow). The pull is spread inward and
+        # fades out before the top; the band along the rim (the name) moves as one piece.
+        ph_e, th_e = angles(edge_points(Vd, Fd))
+        th_e = th_e - lift * front_weight(ph_e)
+        bd = np.unique(np.round(np.stack([th_e * np.cos(ph_e), th_e * np.sin(ph_e)], 1) * 400) / 400, axis=0)
+        contour = inside & ~(np.roll(inside, 1, 0) & np.roll(inside, -1, 0)
+                             & np.roll(inside, 1, 1) & np.roll(inside, -1, 1))
+        cy, cx = np.nonzero(contour)
+        ba = np.stack([cx, cy], 1) / scale - lim
+        disp = np.zeros_like(bd)
+        for s0 in range(0, len(bd), 512):
+            d2 = ((bd[s0:s0 + 512, None] - ba[None]) ** 2).sum(2)
+            disp[s0:s0 + 512] = ba[np.argmin(d2, 1)] - bd[s0:s0 + 512]
+        # smooth the pairing along the rim (nearest points jump where the outlines turn differently)
+        sm_d = np.zeros_like(disp)
+        for s0 in range(0, len(bd), 512):
+            w_ = np.exp(-((bd[s0:s0 + 512, None] - bd[None]) ** 2).sum(2) / (2 * 0.03 ** 2))
+            sm_d[s0:s0 + 512] = (w_ @ disp) / w_.sum(1, keepdims=True)
+        tgt = bd + sm_d  # put the smoothed targets back on the AC8 rim (smoothing cuts inside corners)
+        for s0 in range(0, len(bd), 512):
+            d2 = ((tgt[s0:s0 + 512, None] - ba[None]) ** 2).sum(2)
+            disp[s0:s0 + 512] = ba[np.argmin(d2, 1)] - bd[s0:s0 + 512]
+        G = 384
+        gx_, gy_ = np.meshgrid(np.linspace(-lim, lim, G), np.linspace(-lim, lim, G))
+        cells = np.stack([gx_.ravel(), gy_.ravel()], 1)
+        D = np.zeros_like(cells)
+        dmin = np.zeros(len(cells))
+        for s0 in range(0, len(cells), 2048):
+            d2 = ((cells[s0:s0 + 2048, None] - bd[None]) ** 2).sum(2)
+            w_ = 1 / (d2 + 0.01 ** 2) ** 2
+            D[s0:s0 + 2048] = (w_ @ disp) / w_.sum(1, keepdims=True)
+            dmin[s0:s0 + 2048] = np.sqrt(d2.min(1))
+        c_th = np.hypot(cells[:, 0], cells[:, 1])
+        c_ph = np.arctan2(cells[:, 1], cells[:, 0])
+        outside = c_th >= rim_at(rim_d, c_ph) - lift * front_weight(c_ph)
+        fade = np.clip(1 - (dmin - 0.2) / 0.7, 0, 1)  # full within ~11 degrees of the rim, none ~50 degrees in
+        fade = np.where(outside, 1.0, fade * fade * (3 - 2 * fade))
+        D = (D * fade[:, None]).reshape(G, G, 2)
+        gscale = (G - 1) / (2 * lim)
+
         log("Helmet: finding the DCS shell's texels…")
         pix, tri_ds, bar_ds = [], [], []
         for f, (t0, t1, t2) in enumerate(FTd):
@@ -532,16 +574,18 @@ class HelmetMap:
             sl = slice(s0, s0 + 500000)
             pts = (bar_d_all[sl, :, None].astype(np.float64) * Vd[Fd[tri_d_all[sl]]]).sum(1)
             phi, th = angles(pts)
-            rd = rim_at(rim_d, phi) - lift * front_weight(phi)  # where the AC8 rim should land
-            ra = np.minimum(rim_at(rim_a, phi) - inset, ray_at(phi))  # the AC8 rim (just inside its edge)
-            t = th / rd
-            # theta_a = theta + (ra - rd) * s(t): the difference is spread over the middle of the shell (s rises
-            # from 0 at t=0.15 to 1 at t=0.8), so the top stays put and the band by the rim only moves
-            sm = np.clip((t - 0.15) / 0.65, 0, 1)
-            sm = sm * sm * (3 - 2 * sm)
-            tha = np.minimum(th + (ra - rd) * sm, ra)  # past the raised rim (behind the brow pad): the AC8 edge
-            gx = (tha * np.cos(phi) + lim) * scale
-            gy = (tha * np.sin(phi) + lim) * scale
+            px, py = th * np.cos(phi), th * np.sin(phi)
+            cxg = np.clip((px + lim) * gscale, 0, G - 1.001)
+            cyg = np.clip((py + lim) * gscale, 0, G - 1.001)
+            i0, j0 = cxg.astype(int), cyg.astype(int)
+            ax, ay = (cxg - i0)[:, None], (cyg - j0)[:, None]
+            dv = (D[j0, i0] * (1 - ax) * (1 - ay) + D[j0, i0 + 1] * ax * (1 - ay)
+                  + D[j0 + 1, i0] * (1 - ax) * ay + D[j0 + 1, i0 + 1] * ax * ay)
+            qx, qy = px + dv[:, 0], py + dv[:, 1]
+            qph = np.arctan2(qy, qx)
+            qth = np.minimum(np.hypot(qx, qy), ray_at(qph))  # never off the AC8 shell (behind the brow pad: its edge)
+            gx = (qth * np.cos(qph) + lim) * scale
+            gy = (qth * np.sin(qph) + lim) * scale
             x0 = np.clip(np.floor(gx).astype(int), 0, self.GRID - 2)
             y0 = np.clip(np.floor(gy).astype(int), 0, self.GRID - 2)
             fx, fy = (gx - x0)[:, None], (gy - y0)[:, None]
