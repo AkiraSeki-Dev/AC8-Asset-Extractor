@@ -141,6 +141,12 @@ AC8 Asset Extractor\
 
 ## Version history
 
+v1.3.0: a DCS World page.
+- **Texture converter:** AC8 → PBR, AC8 → DCS, PBR → DCS and DCS → PBR, from an extraction or any folder, saved as DDS
+  (compressed, with mipmaps), PNG or TGA. DCS sets: `<name>`, `<name>_Roughmet`, `<name>_Normal`.
+- **F/A-18 pilot helmet converter:** moves an Ace Combat 8 pilot helmet's colour, normal and metal/rough maps onto
+  the DCS F/A-18 helmet's UV layout, keeping the DCS helmet's visor and straps.
+
 v1.2.8: catalog fixes.
 - The page's Extract button extracts just what's selected (it reads **Extract selected**); with nothing selected,
   **Extract now** still takes the whole entry.
