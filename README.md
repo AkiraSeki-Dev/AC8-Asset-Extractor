@@ -124,6 +124,13 @@ AC8 Asset Extractor\
 
 ## Version history
 
+v1.2.8: catalog fixes.
+- The page's Extract button extracts just what's selected (it reads **Extract selected**); with nothing selected,
+  **Extract now** still takes the whole entry.
+- Catalog extractions ignore the Type filter, so a model always comes out with its materials and textures (GLB and
+  FBX), and the folder is named after the aircraft / character again (not the shared folder its materials are in).
+- Short catalog pages no longer scroll.
+
 v1.2.7: clearer selecting in the catalog.
 - Selected rows are outlined in orange with a tick and read "✓ Selected"; click the row again to deselect.
 - Selecting a model also selects the materials and textures it uses, even ones in other folders (read from the
