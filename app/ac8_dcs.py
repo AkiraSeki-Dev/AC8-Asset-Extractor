@@ -388,16 +388,21 @@ def _rasterize(points2d, faces, values, grid, lo, hi):
 class HelmetMap:
     """Which point of the AC8 helmet each texel of the DCS helmet shell shows (worked out once per size).
 
-    Both shells are caps round the same centre and are drawn flat around their tops. Each point of the DCS
-    shell's edge is paired with the nearest point of the AC8 shell's edge, and that pull is spread inward and
-    fades out before the top: the design is stretched straight across to the DCS edge (sideways at the sides of
-    the face opening), with no edge line smeared outward and no gaps. At the front, the DCS edge used is raised
-    (RAISE) so the name clears the brow pad; below it (behind the pad) the AC8 paint just stops at its edge."""
+    Both shells are caps round the same centre and are drawn flat around their tops. The DCS shell's edge is
+    laid onto the AC8 shell's edge (matched at the corners of the face opening and by direction elsewhere) and
+    that pull is spread inward, fading out before the top, so the design flows in smooth curves out to the DCS
+    edge with nothing smeared or repeated. Where the outlines turn differently and the pull would still run past
+    the AC8 edge, the design is eased in over a wider strip. At the front the design is raised (RAISE) so the name
+    clears the brow pad, and the thin strip under the name is stretched down to the DCS edge (behind the pad).
+    A few texels past the shell's UV edge are mapped the same way, so mipmaps stay clean."""
     PAD = 8       # pixels painted past the shell's UV edges, so mipmaps don't pull in the old colours
     RAISE = 1.55  # at the front: how far above the DCS rim the AC8 rim lands (units of the meshes, ~24 across)
     INSET = 0.35  # the AC8 rim used is this far inside its edge (the original paint spills past the edge)
     GRID = 3072   # resolution of the AC8 shell's lookup image
-    BAND = 240    # texels (at 4096) of each row stretched sideways to fill a gap at its end
+    FRONT = (50, 90)  # degrees from the front: the raise is full up to the first, gone by the second
+    EASE = 5      # how many times wider than an overrun the strip it is eased in over is
+    SQUEEZE = 0.01  # radians: how far in from the AC8 edge paint that would run past it is eased in
+    UNDER = 0.03  # at the front: the strip of the AC8 design under the name that is stretched to the DCS edge
     SPREAD = 2    # how locally the pull follows the nearest bit of rim (higher: more local)
     FADE = (0.2, 0.7)  # the pull is full this far in from the rim, then fades out over this much (radians)
 
@@ -411,12 +416,6 @@ class HelmetMap:
         if not np.isscalar(raise_):  # FRONT,BACK from older settings: the front is what counts now
             raise_ = raise_[0]
         self.ac8_uv, self.ac8_ft = Ta, FTa
-        # painted details of the AC8 helmet that the DCS helmet doesn't have (the strap slots and their rims),
-        # in AC8 UV space: closed up before the transfer
-        self.paintout = None
-        if "ac8_paintout" in m:
-            n = int(m["ac8_paintout_size"][0])
-            self.paintout = np.unpackbits(m["ac8_paintout"])[:n * n].reshape(n, n).astype(bool)
 
         # the shared centre: a sphere fitted to the DCS shell
         A_ = np.c_[2 * Vd, np.ones(len(Vd))]
@@ -465,7 +464,7 @@ class HelmetMap:
 
         def front_weight(phi):  # 1 across the front (where the name is), 0 from the sides round to the back
             a = np.degrees(np.abs(phi))
-            t_ = np.clip((90 - a) / 40, 0, 1)
+            t_ = np.clip((self.FRONT[1] - a) / (self.FRONT[1] - self.FRONT[0]), 0, 1)
             return t_ * t_ * (3 - 2 * t_)
 
         # the AC8 shell drawn flat around its top (distance from the top, in the direction phi): a lookup image of
@@ -556,19 +555,22 @@ class HelmetMap:
             return L
 
         def anchors(L):
-            """Matching points round the loop (indices): the corners of the face opening, and elsewhere fixed
-            directions, so away from the corners the pull is straight out (no sideways shift of the design)."""
+            """Matching points round the loop (indices): each corner of the face opening (where the edge comes
+            closest to the top, between the front and the side) and, elsewhere, fixed directions, so away from
+            the corners the pull is straight out (no sideways shift of the design)."""
             th_ = np.hypot(L[:, 0], L[:, 1])
-            ph_ = np.unwrap(np.arctan2(L[:, 1], L[:, 0]))
+            ph_ = np.degrees(np.unwrap(np.arctan2(L[:, 1], L[:, 0])))
             ph_ = ph_ - ph_[0]
-            over = np.nonzero(th_ > (th_[0] + th_.max()) / 2)[0]
-            c1, c2 = int(over[0]), int(over[-1])
 
-            def at(deg, lo, hi):
-                return lo + int(np.argmax(ph_[lo:hi] >= np.radians(deg)))
-            k = [0, at(25, 0, c1), c1]
-            k += [at(d, c1, c2) for d in (90, 120, 150, 180, 210, 240, 270)]
-            k += [c2, at(335, c2, len(L)), len(L)]
+            def at(deg):
+                return int(np.argmax(ph_ >= deg))
+
+            def notch(lo, hi):
+                i_ = np.arange(at(lo), at(hi))
+                return int(i_[np.argmin(th_[i_])])
+            k = [0, at(20), notch(25, 75), at(80)]
+            k += [at(d) for d in (100, 130, 160, 180, 200, 230, 260)]
+            k += [at(280), notch(285, 335), at(340), len(L)]
             return k
 
         # The warp, drawn flat: the DCS rim (raised at the front) is laid onto the AC8 rim (INSET inside its edge)
@@ -610,11 +612,12 @@ class HelmetMap:
         gscale = (G - 1) / (2 * lim)
 
         log("Helmet: finding the DCS shell's texels…")
-        pix, tri_ds, bar_ds = [], [], []
+        pix, tri_ds, bar_ds, depths = [], [], [], []
+        pad_px = self.PAD * W / 4096
         for f, (t0, t1, t2) in enumerate(FTd):
             uv = np.array([Td[t0], Td[t1], Td[t2]]) * [W, -H] + [0, H]  # pixels (v up -> rows down)
-            x0, y0 = np.floor(uv.min(0)).astype(int)
-            x1, y1 = np.ceil(uv.max(0)).astype(int)
+            x0, y0 = np.floor(uv.min(0)).astype(int) - pad_px
+            x1, y1 = np.ceil(uv.max(0)).astype(int) + pad_px
             xs, ys = np.meshgrid(np.arange(max(x0, 0), min(x1 + 1, W)), np.arange(max(y0, 0), min(y1 + 1, H)))
             P = np.stack([xs.ravel() + 0.5, ys.ravel() + 0.5], 1)
             a, b, c = uv
@@ -624,29 +627,51 @@ class HelmetMap:
             l0 = ((b[1] - c[1]) * (P[:, 0] - c[0]) + (c[0] - b[0]) * (P[:, 1] - c[1])) / den
             l1 = ((c[1] - a[1]) * (P[:, 0] - c[0]) + (a[0] - c[0]) * (P[:, 1] - c[1])) / den
             l2 = 1 - l0 - l1
-            ok = (l0 >= -1e-4) & (l1 >= -1e-4) & (l2 >= -1e-4)
+            # distance (pixels) inside the triangle: the texels a few pixels past the shell's UV edge are mapped
+            # too (carried on smoothly from the triangle), so mipmaps and filtering never pull in other colours
+            area2 = abs(den)
+            hs = [area2 / max(np.linalg.norm(b - c), 1e-9), area2 / max(np.linalg.norm(c - a), 1e-9),
+                  area2 / max(np.linalg.norm(a - b), 1e-9)]
+            depth = np.minimum(np.minimum(l0 * hs[0], l1 * hs[1]), l2 * hs[2])
+            ok = depth >= -pad_px
             if ok.any():
                 pix.append(P[ok].astype(np.int32))
                 tri_ds.append(np.full(ok.sum(), f, np.int32))
                 bar_ds.append(np.stack([l0[ok], l1[ok], l2[ok]], 1).astype(np.float32))
+                depths.append(depth[ok].astype(np.float32))
         pix, tri_d_all, bar_d_all = np.concatenate(pix), np.concatenate(tri_ds), np.concatenate(bar_ds)
+        depth_all = np.concatenate(depths)
+        # each texel once, from the triangle it is deepest inside
+        key = pix[:, 1].astype(np.int64) * W + pix[:, 0]
+        order = np.lexsort((-depth_all, key))
+        first = np.r_[True, key[order][1:] != key[order][:-1]]
+        sel = order[first]
+        pix, tri_d_all, bar_d_all = pix[sel], tri_d_all[sel], bar_d_all[sel]
+        self.core = depth_all[sel] >= -1e-3   # on the shell itself (the rest is the padding round it)
 
         log(f"Helmet: matching {len(pix):,} texels to the AC8 helmet…")
         n_all = len(pix)
 
-        def front_only(phi):  # the warp is used across the front (the name); 0 from the corners of the face opening
-            t_ = np.clip((np.radians(60) - np.abs(phi)) / np.radians(22), 0, 1)
-            return t_ * t_ * (3 - 2 * t_)
-
-        # 1. where each DCS texel lands on the flattened AC8 shell: as lined up, plus the warp at the front
+        # 1. where each DCS texel lands on the flattened AC8 shell: as lined up, plus the warp
         qx_all = np.zeros(n_all)
         qy_all = np.zeros(n_all)
-        valid = np.zeros(n_all, bool)
-        keep = np.zeros(n_all, bool)
         for s0 in range(0, n_all, 500000):
             sl = slice(s0, s0 + 500000)
             pts = (bar_d_all[sl, :, None].astype(np.float64) * Vd[Fd[tri_d_all[sl]]]).sum(1)
             phi, th = angles(pts)
+            # At the front the design is raised (the name clears the brow pad): rather than running off the
+            # AC8 edge below the raised rim, the thin strip under the name is stretched down to the DCS edge.
+            # Depth from the DCS rim d -> depth from the raised rim smax(k d, d - L) (a smooth corner just
+            # under the name; the rest of the shell only moves up by L).
+            L_ = lift * front_weight(phi)
+            rdt = rim_at(rim_d, phi)
+            dd = rdt - th
+            ga = self.UNDER / radius
+            k_ = ga / (L_ + ga)
+            w_ = (0.04 / radius) * L_ / max(lift, 1e-9)
+            a_, b_ = k_ * dd, dd - L_
+            f_ = (a_ + b_ + np.sqrt((a_ - b_) ** 2 + w_ ** 2)) / 2
+            th = (rdt - L_) - f_
             px, py = th * np.cos(phi), th * np.sin(phi)
             cxg = np.clip((px + lim) * gscale, 0, G - 1.001)
             cyg = np.clip((py + lim) * gscale, 0, G - 1.001)
@@ -654,122 +679,35 @@ class HelmetMap:
             ax, ay = (cxg - i0)[:, None], (cyg - j0)[:, None]
             dv = (D[j0, i0] * (1 - ax) * (1 - ay) + D[j0, i0 + 1] * ax * (1 - ay)
                   + D[j0 + 1, i0] * (1 - ax) * ay + D[j0 + 1, i0 + 1] * ax * ay)
-            wf = front_only(phi)
-            qx, qy = px + dv[:, 0] * wf, py + dv[:, 1] * wf
-            gx = np.clip(np.round((qx + lim) * scale).astype(int), 0, self.GRID - 1)
-            gy = np.clip(np.round((qy + lim) * scale).astype(int), 0, self.GRID - 1)
-            # on the AC8 shell (INSET inside its edge), or at the front (behind the brow pad: its edge is used)
-            valid[sl] = inside[gy, gx] | (wf > 0.5)
-            qx_all[sl], qy_all[sl] = qx, qy
-            keep[sl] = wf > 0.5  # the front (the name) stays exactly where the warp puts it
+            qx_all[sl], qy_all[sl] = px + dv[:, 0], py + dv[:, 1]
 
-        # 2. where the DCS shell reaches past the AC8 one, the design near the edge is stretched out to fill it,
-        # straight across the edge in the DCS texture: a smooth offset field (solved on a coarse grid so there are
-        # no steps from row to row), the full offset at the shell's edge and none from BAND texels inside (or
-        # anywhere on the front, which stays put). Each texel then takes the AC8 spot of the texel it points at.
-        log("Helmet: stretching the design out to the DCS edge…")
-        QX = np.zeros((H, W), np.float32)
-        QY = np.zeros((H, W), np.float32)
-        OK = np.zeros((H, W), bool)
-        QX[pix[:, 1], pix[:, 0]] = qx_all
-        QY[pix[:, 1], pix[:, 0]] = qy_all
-        OK[pix[:, 1], pix[:, 0]] = valid
-        # fill the AC8 spots a little way past the valid area (nearest valid texel) so reads at its edge are clean
-        ys_, xs_ = pix[:, 1], pix[:, 0]
-        by0, by1 = max(ys_.min() - 40, 0), min(ys_.max() + 41, H)
-        bx0, bx1 = max(xs_.min() - 40, 0), min(xs_.max() + 41, W)
-        qx_b, qy_b, ok_b = QX[by0:by1, bx0:bx1], QY[by0:by1, bx0:bx1], OK[by0:by1, bx0:bx1].copy()
-        for _ in range(int(32 * W / 4096)):
-            grow = ~ok_b & (np.roll(ok_b, 1, 0) | np.roll(ok_b, -1, 0) | np.roll(ok_b, 1, 1) | np.roll(ok_b, -1, 1))
-            if not grow.any():
-                break
-            for axis, step in ((0, 1), (0, -1), (1, 1), (1, -1)):
-                take = grow & np.roll(ok_b, step, axis)
-                qx_b[take] = np.roll(qx_b, step, axis)[take]
-                qy_b[take] = np.roll(qy_b, step, axis)[take]
-                grow &= ~take
-                ok_b |= take
-
-        # the offset field on a coarse grid (cells of C texels)
-        C = max(W // 256, 1)
-        gh, gw = -(-H // C), -(-W // C)
-
-        def coarse(mask, frac):
-            m_ = np.zeros((gh * C, gw * C), np.float32)
-            m_[:H, :W] = mask
-            return m_.reshape(gh, C, gw, C).mean((1, 3)) > frac
-        SHc = np.zeros((H, W), bool)
-        SHc[ys_, xs_] = True
-        KPc = np.zeros((H, W), bool)
-        KPc[ys_, xs_] = keep
-        sh = coarse(SHc, 0.0)                 # cells touching the shell
-        ok_c = coarse(OK, 0.5) & sh           # cells that are mostly fine as they are
-        kp_c = coarse(KPc, 0.0)
-        del SHc, KPc
-
-        def nb_any(m_):
-            return np.roll(m_, 1, 0) | np.roll(m_, -1, 0) | np.roll(m_, 1, 1) | np.roll(m_, -1, 1)
-        edge = sh & nb_any(~sh)               # the shell's outline
-        # how far each cell is from the part that needs filling
-        far = sh & ~ok_c
-        dist = np.where(far, 0, 10 ** 6)
-        reach = far.copy()
-        band = max(int(round(self.BAND * W / 4096 / C)), 4)
-        for k in range(1, band + 1):
-            reach = (nb_any(reach) | reach) & sh
-            dist = np.where(reach & (dist > k), k, dist)
-        fixed0 = sh & ((dist >= band) | kp_c) & ~edge   # held still
-        # at the outline: point at the nearest fine cell (evened out along the outline)
-        ey, ex = np.nonzero(edge)
-        oy, ox = np.nonzero(ok_c & ~nb_any(~ok_c) | (ok_c & kp_c))
-        tgt = np.zeros((len(ey), 2))
-        if len(oy) and len(ey):
-            okp = np.stack([ox, oy], 1).astype(np.float64)
-            ep = np.stack([ex, ey], 1).astype(np.float64)
-            for s0 in range(0, len(ep), 256):
-                d2 = ((ep[s0:s0 + 256, None] - okp[None]) ** 2).sum(2)
-                tgt[s0:s0 + 256] = okp[np.argmin(d2, 1)] - ep[s0:s0 + 256]
-            sm_t = np.zeros_like(tgt)
-            for s0 in range(0, len(ep), 256):
-                w_ = np.exp(-((ep[s0:s0 + 256, None] - ep[None]) ** 2).sum(2) / (2 * 2.0 ** 2))
-                sm_t[s0:s0 + 256] = (w_ @ tgt) / w_.sum(1, keepdims=True)
-            tgt = sm_t
-        # cells on the outline that are themselves fine and held still don't move
-        Dx = np.zeros((gh, gw))
-        Dy = np.zeros((gh, gw))
-        Dx[ey, ex], Dy[ey, ex] = tgt[:, 0], tgt[:, 1]
-        hold = edge | fixed0
-        Dx[fixed0], Dy[fixed0] = 0, 0
-        free = sh & ~hold
-        # smooth in between (repeated neighbour averaging over the shell; outside cells mirror their neighbour)
-        nshs = [(axis, step, np.roll(sh, step, axis)) for axis, step in ((0, 1), (0, -1), (1, 1), (1, -1))]
-        cnt = np.maximum(sum(n_.astype(np.float64) for _, _, n_ in nshs), 1)
-        for _ in range(3 * band * band):
-            for D_ in (Dx, Dy):
-                acc = sum(np.where(n_, np.roll(D_, step, axis), 0) for axis, step, n_ in nshs)
-                D_[free] = (acc / cnt)[free]
-        # each texel's offset (in texels), then the AC8 spot it takes
-        gxp = (pix[:, 0] + 0.5) / C - 0.5
-        gyp = (pix[:, 1] + 0.5) / C - 0.5
-        i0 = np.clip(np.floor(gxp).astype(int), 0, gw - 2)
-        j0 = np.clip(np.floor(gyp).astype(int), 0, gh - 2)
-        fx_, fy_ = gxp - i0, gyp - j0
-
-        def bil(D_):
-            return (D_[j0, i0] * (1 - fx_) * (1 - fy_) + D_[j0, i0 + 1] * fx_ * (1 - fy_)
-                    + D_[j0 + 1, i0] * (1 - fx_) * fy_ + D_[j0 + 1, i0 + 1] * fx_ * fy_)
-        sx = np.clip(pix[:, 0] + bil(Dx) * C - bx0, 0, bx1 - bx0 - 1.001)
-        sy = np.clip(pix[:, 1] + bil(Dy) * C - by0, 0, by1 - by0 - 1.001)
-        moved = (np.abs(sx + bx0 - pix[:, 0]) > 0.01) | (np.abs(sy + by0 - pix[:, 1]) > 0.01)
-        a0, b0 = sx.astype(int), sy.astype(int)
-        ax_, ay_ = sx - a0, sy - b0
-
-        def bil2(I_):
-            return (I_[b0, a0] * (1 - ax_) * (1 - ay_) + I_[b0, a0 + 1] * ax_ * (1 - ay_)
-                    + I_[b0 + 1, a0] * (1 - ax_) * ay_ + I_[b0 + 1, a0 + 1] * ax_ * ay_)
-        qx_all = np.where(moved, bil2(qx_b), qx_all)
-        qy_all = np.where(moved, bil2(qy_b), qy_all)
-        del QX, QY, OK, qx_b, qy_b, ok_b
+        # 2. in the few directions where the warp would still run past the AC8 edge (where the two outlines turn
+        # differently), the design is eased in along that direction over a band a few times wider than the
+        # overrun, so it is squeezed a little over a wide strip instead of a lot right at the edge
+        nb = 1440
+        qa_ = np.arctan2(qy_all, qx_all)
+        rho = np.hypot(qx_all, qy_all) / np.maximum(ray_at(qa_) - 0.004, 1e-6)
+        bins_ = ((qa_ + np.pi) / (2 * np.pi) * nb).astype(int) % nb
+        mx = np.ones(nb)
+        np.maximum.at(mx, bins_, rho)
+        wn = 12   # (each bin is a quarter degree)
+        ext = np.r_[mx[-2 * wn:], mx, mx[:2 * wn]]
+        mx = np.max(np.stack([ext[i:i + nb] for i in range(4 * wn + 1)]), 0)  # widen each peak, then soften it
+        kk = np.exp(-0.5 * (np.arange(-wn, wn + 1) / (wn / 2)) ** 2)
+        mx = np.convolve(np.r_[mx[-wn:], mx, mx[:wn]], kk / kk.sum(), mode="valid")
+        mx = np.maximum(mx, 1.0)
+        m_ = np.interp((qa_ + np.pi) / (2 * np.pi) * nb - 0.5, np.arange(-1, nb + 1), np.r_[mx[-1], mx, mx[0]])
+        over_ = m_ > 1.0005
+        if over_.any():
+            m_o = m_[over_]
+            r0 = np.maximum(1 - self.EASE * (m_o - 1), 0.3)
+            beta = (m_o - r0) / (1 - r0)
+            x_ = np.clip((rho[over_] - r0) / (m_o - r0), 0, None)
+            h_ = np.where(x_ < 1, beta * x_ + (1 - beta) * x_ * x_, 1 + 0 * x_)
+            new_rho = np.where(rho[over_] > r0, r0 + (1 - r0) * h_, rho[over_])
+            fac = new_rho / np.maximum(rho[over_], 1e-9)
+            qx_all[over_] *= fac
+            qy_all[over_] *= fac
 
         # 3. read the AC8 UV (and triangle) there
         uv_a = np.zeros((n_all, 2), np.float32)
@@ -779,7 +717,12 @@ class HelmetMap:
             sl = slice(s0, s0 + 500000)
             qx, qy = qx_all[sl], qy_all[sl]
             qph = np.arctan2(qy, qx)
-            qth = np.minimum(np.hypot(qx, qy), ray_at(qph))  # never off the AC8 shell
+            # never off the AC8 shell: anything that would run past its edge is eased in just inside it (a smooth
+            # squeeze, no streaks from repeating the edge pixel)
+            r_, R_ = np.hypot(qx, qy), ray_at(qph)
+            e_ = self.SQUEEZE
+            knee = R_ - e_
+            qth = np.where(r_ < knee, r_, R_ - e_ * np.exp(-(r_ - knee) / e_))
             gx = (qth * np.cos(qph) + lim) * scale
             gy = (qth * np.sin(qph) + lim) * scale
             # the exact point on the AC8 triangle in this direction from the centre (the flat image only says
@@ -839,33 +782,9 @@ class HelmetMap:
         return self._frames
 
     def _sample(self, path):
-        img = self._clean(np.asarray(Image.open(path).convert("RGBA"), dtype=np.float32))
+        img = np.asarray(Image.open(path).convert("RGBA"), dtype=np.float32)
         h, w = img.shape[:2]
         return _bilinear(img, self.uv_a[:, 0] * w - 0.5, (1 - self.uv_a[:, 1]) * h - 0.5)
-
-    def _clean(self, img):
-        """Close up AC8's painted strap slots (the DCS helmet has its own strap fittings): row by row, the paint
-        on each side of a slot is stretched sideways over it, so the design carries on with no new pixels."""
-        if self.paintout is None:
-            return img
-        h, w = img.shape[:2]
-        po = np.asarray(Image.fromarray(self.paintout.astype(np.uint8) * 255).resize((w, h), Image.BILINEAR)) > 0
-        out = img.copy()
-        for y in np.nonzero(po.any(1))[0]:
-            row = po[y]
-            d = np.diff(np.concatenate([[0], row.astype(np.int8), [0]]))
-            for x0, x1 in zip(np.nonzero(d == 1)[0], np.nonzero(d == -1)[0]):
-                width = x1 - x0
-                xm = (x0 + x1) / 2
-                l0, r1 = max(x0 - width, 0), min(x1 + width, w)  # the paint beside the slot, as wide as the slot
-                for lo, hi, s_lo, s_hi in ((l0, int(np.ceil(xm)), l0, x0), (int(np.ceil(xm)), r1, x1, r1)):
-                    if hi <= lo or s_hi <= s_lo:
-                        continue
-                    xs = np.arange(lo, hi)
-                    src = s_lo + (xs - lo) * (s_hi - s_lo) / (hi - lo)  # stretch [s_lo, s_hi) over [lo, hi)
-                    for c in range(img.shape[2]):
-                        out[y, lo:hi, c] = np.interp(src, np.arange(w), img[y, :, c])
-        return out
 
     def _base(self, path, channels):
         """The DCS helmet's own map to paint the shell into, or (without one) a transparent image, so the shell
