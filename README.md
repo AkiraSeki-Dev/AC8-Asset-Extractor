@@ -142,6 +142,12 @@ AC8 Asset Extractor\
 
 ## Version history
 
+v1.3.1: a better F/A-18 helmet converter.
+- Paint that's off the AC8 helmet mesh (the original texture's spill past its edges) is no longer carried across,
+  and past the AC8 rim the paint pattern carries on instead of being stretched into streaks.
+- AC8's painted strap slots are left out (the DCS helmet has its own strap fittings).
+- **Move design up** lifts the design to the DCS helmet's slightly higher brow edge (on by default).
+
 v1.3.0: a DCS World page.
 - **Texture converter:** AC8 → PBR, AC8 → DCS, PBR → DCS and DCS → PBR, from an extraction or any folder, saved as DDS
   (compressed, with mipmaps), PNG or TGA. DCS sets: `<name>`, `<name>_Roughmet`, `<name>_Normal`.
