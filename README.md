@@ -122,6 +122,11 @@ AC8 Asset Extractor\
 
 ## Version history
 
+v1.2.7: clearer selecting in the catalog.
+- Selected rows are outlined in orange with a tick and read "✓ Selected"; click the row again to deselect.
+- Selecting a model also selects the materials and textures it uses, even ones in other folders (read from the
+  mesh the first time, then remembered until the next Scan Game).
+
 v1.2.6: the logo text at the top of the app (and of the 3D viewer page) is back to "ACE COMBAT 8" in capitals, to
 match the line under it.
 
