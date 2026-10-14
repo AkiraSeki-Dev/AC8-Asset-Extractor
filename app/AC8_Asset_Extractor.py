@@ -52,6 +52,7 @@ DATA_DIR = HERE / "data"                       # your own files: settings, asset
 SETTINGS_FILE = DATA_DIR / "ac8_extractor_settings.json"
 INDEX_FILE = DATA_DIR / "asset_index.txt"
 HISTORY_FILE = DATA_DIR / "asset_history.json"   # files that appeared in each game update (found by Scan Game)
+DEPS_FILE = DATA_DIR / "mesh_textures.json"      # the materials / textures each model selected in the catalog uses
 ARROW = "arrow" if os.name == "nt" else ""  # the standard pointer (X11's own "arrow" is a different shape)
 FONTS_DIR = CODE / "fonts"
 ASSETS_DIR = CODE / "assets"
@@ -1000,6 +1001,8 @@ class App(tk.Tk):
         self.index = AssetIndex()
         self.view = None        # AssetIndex used for the tree right now (full or search results)
         self.checked = set()    # ticked keys (folders or assets); never one inside another
+        self._cat_rows = []     # catalog page rows, painted orange while selected
+        self._mesh_deps = self._load_mesh_deps()  # mesh key -> materials / textures it uses
         self.partial = set()    # every folder that has something ticked inside it
         self._search_job = None
 
@@ -1394,6 +1397,12 @@ class App(tk.Tk):
     def _set_index(self, paths, source, save):
         old = {k for k, _kl, _t in self.index.files} if (source == "game scan" and len(self.index)) else None
         self.index = AssetIndex(paths, source)
+        if source == "game scan":  # a game update can change what a model uses: look it up again
+            self._mesh_deps = {}
+            try:
+                DEPS_FILE.unlink()
+            except OSError:
+                pass
         if old is not None:
             new = {k for k, _kl, _t in self.index.files}
             added, removed = sorted(new - old), len(old - new)
@@ -1533,6 +1542,12 @@ class App(tk.Tk):
                 self._expand_all(child)
 
     # --- ticking
+    def _load_mesh_deps(self):
+        try:
+            return json.loads(DEPS_FILE.read_text()).get("deps", {})
+        except (OSError, ValueError, AttributeError):
+            return {}
+
     def _state(self, key):
         if key in self.checked:
             return "on"
@@ -1558,6 +1573,7 @@ class App(tk.Tk):
             self.tree.item(iid, image=self.img[self._state(iid)])
             stack += self.tree.get_children(iid)
         self._update_selection()
+        self._cat_paint_rows()
 
     def _on_tree_click(self, e):
         if self.tree.identify_region(e.x, e.y) != "tree":
@@ -3020,19 +3036,114 @@ class App(tk.Tk):
         return f
 
     def _cat_row(self, parent, label, key, mesh=True):
-        r = tk.Frame(parent, bg=C["bg2"], highlightthickness=1, highlightbackground=C["border1"])
+        r = tk.Frame(parent, bg=C["bg2"], highlightthickness=1, highlightbackground=C["border1"], cursor="hand2")
         r.pack(fill="x", pady=(4, 0))
-        tk.Label(r, text=label, bg=C["bg2"], fg=C["text1"], font=F["base"], anchor="w", padx=10,
-                 pady=5).pack(side="left")
+        box = tk.Canvas(r, width=round(16 * SCALE), height=round(16 * SCALE), bg=C["bg2"], highlightthickness=0,
+                        bd=0, cursor="hand2")
+        box.pack(side="left", padx=(10, 0))
+        labels = [tk.Label(r, text=label, bg=C["bg2"], fg=C["text1"], font=F["base"], anchor="w", padx=8, pady=5)]
+        labels[0].pack(side="left")
         stem = key.rsplit("/", 1)[-1].rsplit(".", 1)[0]
         if not label.startswith(stem):
-            tk.Label(r, text=stem, bg=C["bg2"], fg=C["text3"], font=F["mono_s"], anchor="w").pack(side="left",
-                                                                                                  padx=(6, 0))
+            labels.append(tk.Label(r, text=stem, bg=C["bg2"], fg=C["text3"], font=F["mono_s"], anchor="w"))
+            labels[-1].pack(side="left", padx=(6, 0))
+        is_mesh = stem.startswith(("SK_", "SM_"))
         small = dict(font=F["small"], padx=8, pady=1)
-        Button(r, "Select", lambda k=key: self._tick_keys([k]), **small).pack(side="right", padx=(0, 6), pady=3)
+        btn = Button(r, "Select", lambda k=key: self._cat_toggle(k, is_mesh), **small)
+        btn.pack(side="right", padx=(0, 6), pady=3)
         if mesh:
             Button(r, "Preview", lambda k=key, l=label: self.preview_meshes([k], l), **small).pack(
                 side="right", padx=(0, 6), pady=3)
+        self._cat_register(r, box, labels, btn, [key], lambda k=key: self._cat_toggle(k, is_mesh))
+
+    # --- selected rows on catalog pages: an orange outline + tick, and the textures a model uses
+    def _cat_register(self, row, box, labels, btn, keys, toggle):
+        for w in [row, box] + labels:
+            w.bind("<Button-1>", lambda e: toggle())
+        self._cat_rows.append((row, box, labels, btn, keys))
+        self._cat_paint_row(self._cat_rows[-1])
+
+    def _cat_paint_row(self, entry):
+        row, box, labels, btn, keys = entry
+        if not row.winfo_exists():
+            return
+        on = all(self._state(k) == "on" for k in keys)
+        bg = C["accent_tint"] if on else C["bg2"]
+        row.configure(bg=bg, highlightbackground=C["accent"] if on else C["border1"])
+        for w in labels:
+            w.configure(bg=bg)
+        box.configure(bg=bg)
+        box.delete("all")
+        s = int(box["width"])
+        if on:
+            box.create_rectangle(1, 1, s - 1, s - 1, fill=C["accent"], outline=C["accent"])
+            box.create_line(s * .25, s * .5, s * .44, s * .69, s * .75, s * .31, fill="#fff", width=max(2, s // 8),
+                            capstyle="round", joinstyle="round")
+        else:
+            box.create_rectangle(1, 1, s - 1, s - 1, fill=C["bg2"], outline=C["border3"])
+        btn.variant = "danger" if on else "default"
+        btn.set_text("✓ Selected" if on else "Select")
+        btn._paint()
+
+    def _cat_paint_rows(self):
+        self._cat_rows = [e for e in self._cat_rows if e[0].winfo_exists()]
+        for e in self._cat_rows:
+            self._cat_paint_row(e)
+
+    def _cat_toggle(self, key, is_mesh=False):
+        """Select / deselect a catalog row. A model brings the materials and textures it uses along
+        (found by reading the mesh, once, then remembered)."""
+        deps = self._mesh_deps.get(key, []) if is_mesh else []
+        if self._state(key) == "on":
+            for k in [key] + deps:
+                if self._state(k) == "on":
+                    self.toggle(k, refresh=False)
+            self._refresh_boxes()
+            self.v_step.set(f"Deselected {key.rsplit('/', 1)[-1].rsplit('.', 1)[0]} — {self.v_sel.get()}")
+            return
+        self._tick_keys([key] + deps, quiet=True)
+        name = key.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+        if is_mesh and key not in self._mesh_deps:
+            self._find_mesh_deps([key])
+        else:
+            extra = f" + {len(deps)} material(s) / texture(s) it uses" if deps else ""
+            self.v_step.set(f"Selected {name}{extra} — {self.v_sel.get()}")
+
+    def _find_mesh_deps(self, mesh_keys):
+        """Read which materials and textures these meshes use, then select those too."""
+        if (self.worker and self.worker.is_alive()) or not self._paks_dir() or \
+                not KEY_RE.match(self.v_key.get().strip()):
+            self.v_step.set(f"Selected {len(mesh_keys)} model(s) — their textures are added when extracting")
+            return
+        key, paks = self.v_key.get().strip(), self._paks_dir()
+        tmp = self._preview_root() / "_selection_lookup"
+        want = {"MaterialInstanceConstant", "Material", "Texture2D", "TextureCube"}
+
+        def work():
+            names = ", ".join(k.rsplit("/", 1)[-1].rsplit(".", 1)[0] for k in mesh_keys[:3])
+            self.post("step", f"Finding the textures {names} uses…")
+            found = {}
+            try:
+                for mk in mesh_keys:
+                    found[mk] = sorted(k for k in self._unpack_with_deps(key, paks, tmp, [mk], want)
+                                       if not k.startswith("["))
+            finally:
+                shutil.rmtree(tmp, ignore_errors=True)
+            self.post("call", lambda: self._got_mesh_deps(found))
+            n = len({k for v in found.values() for k in v})
+            return f"✔ Selected {names} + {n} material(s) / texture(s) it uses"
+
+        self._start(work, "Finding the textures the model uses…")
+
+    def _got_mesh_deps(self, found):
+        self._mesh_deps.update(found)
+        try:
+            DEPS_FILE.write_text(json.dumps({"index": len(self.index), "deps": self._mesh_deps}))
+        except OSError:
+            pass
+        add = [k for mk, ks in found.items() if self._state(mk) == "on" for k in ks]
+        if add:
+            self._tick_keys(add, quiet=True)
 
     def _tick_keys(self, keys, quiet=False):
         for k in keys:
@@ -3210,10 +3321,24 @@ class App(tk.Tk):
         tk.Label(r, text=f"{len(keys)} file(s)" + (f" · {len(meshes)} mesh(es)" if meshes else ""), bg=C["bg2"],
                  fg=C["text3"], font=F["small"]).pack(side="left", padx=(6, 0))
         small = dict(font=F["small"], padx=8, pady=1)
-        Button(r, "Select", lambda: self._tick_keys(keys), **small).pack(side="right", padx=(0, 6), pady=3)
+        box = tk.Canvas(r, width=round(16 * SCALE), height=round(16 * SCALE), bg=C["bg2"], highlightthickness=0,
+                        bd=0, cursor="hand2")
+        box.pack(side="left", padx=(10, 0), before=r.winfo_children()[0])
+
+        def toggle():
+            if all(self._state(k) == "on" for k in keys):
+                for k in keys:
+                    if self._state(k) == "on":
+                        self.toggle(k, refresh=False)
+                self._refresh_boxes()
+            else:
+                self._tick_keys(keys)
+        btn = Button(r, "Select", toggle, **small)
+        btn.pack(side="right", padx=(0, 6), pady=3)
         if meshes:
             Button(r, "Preview", lambda: self.preview_meshes(meshes[:30], folder.rsplit("/", 1)[-1]), **small).pack(
                 side="right", padx=(0, 6), pady=3)
+        self._cat_register(r, box, [w for w in r.winfo_children() if isinstance(w, tk.Label)], btn, keys, toggle)
 
     def _show_collection(self, gname, ikey):
         it = self.cat_data["collections"][gname][ikey]
@@ -3372,6 +3497,51 @@ class App(tk.Tk):
                 shutil.rmtree(d, ignore_errors=True)
         return freed / 1e6
 
+    def _unpack_with_deps(self, key, paks, raw, start_keys, want, rounds=4):
+        """Unpack start_keys into raw and, round by round, what they import of the classes in `want`
+        (mesh -> materials -> textures / parent materials -> their textures). Returns the display keys of
+        everything they use (not the start keys themselves); packages already in raw are reused."""
+        from ac8_package import Package
+        done, found = set(), set()
+        todo = [full_path(k) for k in start_keys]
+        for round_ in range(rounds):
+            todo = [t for t in todo if t not in done]
+            if not todo:
+                break
+            self.post("status", f"round {round_ + 1}: {len(todo)} package(s)")
+            missing = [t for t in todo if not (raw / t).exists()]
+            if missing:
+                self._retoc(key, missing, raw, paks)
+            done.update(todo)
+            nxt = set()
+            for t in todo:
+                f = raw / (t[:-len(".uasset")] + ".uasset") if t.endswith(".uasset") else raw / (t + ".uasset")
+                if not f.exists():
+                    continue
+                try:
+                    pkg = Package(f)
+                except Exception:
+                    continue
+                for i, imp in enumerate(pkg.imports):
+                    if imp["class"] not in want or imp["name"].startswith("Default__"):
+                        continue
+                    path = pkg.import_path(-i - 1)
+                    if not path or not path[0].startswith("/"):
+                        continue
+                    pp = path[0]
+                    if pp.startswith("/Game/"):
+                        k = pp[len("/Game/"):] + ".uasset"
+                    elif pp.startswith("/Engine/"):
+                        k = "[Engine Content]/" + pp[len("/Engine/"):] + ".uasset"
+                    else:
+                        continue
+                    node, fname = self.index.find(k)
+                    if node is not None and fname is not None:
+                        nxt.add(full_path(k))
+                        found.add(k)
+            todo = sorted(nxt)
+        return found - set(start_keys)
+
     def preview_meshes(self, mesh_keys, label, together=False):
         """Unpack the meshes + their materials + textures into _Previews, convert to GLB, open the viewer
         (together: start on all the parts shown at once, e.g. a boss built from many meshes)."""
@@ -3400,45 +3570,8 @@ class App(tk.Tk):
         want = {"MaterialInstanceConstant", "Material", "Texture2D", "TextureCube", "SkeletalMesh", "StaticMesh"}
 
         def work():
-            from ac8_package import Package
             self.post("step", f"Preview: unpacking {len(mesh_keys)} mesh(es)…")
-            done = set()
-            todo = [full_path(k) for k in mesh_keys]
-            for round_ in range(4):  # meshes -> materials -> textures/parent materials -> their textures
-                todo = [t for t in todo if t not in done]
-                if not todo:
-                    break
-                self.post("status", f"round {round_ + 1}: {len(todo)} package(s)")
-                missing = [t for t in todo if not (raw / t).exists()]  # already unpacked earlier: reuse
-                if missing:
-                    self._retoc(key, missing, raw, paks)
-                done.update(todo)
-                nxt = set()
-                for t in todo:
-                    f = raw / (t[:-len(".uasset")] + ".uasset") if t.endswith(".uasset") else raw / (t + ".uasset")
-                    if not f.exists():
-                        continue
-                    try:
-                        pkg = Package(f)
-                    except Exception:
-                        continue
-                    for i, imp in enumerate(pkg.imports):
-                        if imp["class"] not in want or imp["name"].startswith("Default__"):
-                            continue
-                        path = pkg.import_path(-i - 1)
-                        if not path or not path[0].startswith("/"):
-                            continue
-                        pp = path[0]
-                        if pp.startswith("/Game/"):
-                            k = pp[len("/Game/"):] + ".uasset"
-                        elif pp.startswith("/Engine/"):
-                            k = "[Engine Content]/" + pp[len("/Engine/"):] + ".uasset"
-                        else:
-                            continue
-                        node, fname = self.index.find(k)
-                        if node is not None and fname is not None:
-                            nxt.add(full_path(k))
-                todo = sorted(nxt)
+            self._unpack_with_deps(key, paks, raw, mesh_keys, want)
             self.post("step", "Preview: converting to GLB…")
             code, _ = self.run_cmd([console_python(), "-u", MESH_CONVERTER, raw, glb, "--max-texture", size], HERE)
             if code != 0 or not any(glb.rglob("*.glb")):

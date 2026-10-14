@@ -41,7 +41,9 @@ Open **Settings** (top right). A red **Setup needed** bar on the main screen tel
 - **Assets tab:** find files with the **Category / Group / Type** dropdowns or the search bar, select them, and press
   **▶ Extract Selected**.
 - **Catalog tab:** the same files sorted into aircraft, weapons, characters, vehicles, environments, fonts and so on.
-  Pick an entry and use **Extract now**, or **Preview** a part in 3D first.
+  Pick an entry and use **Extract now**, or **Preview** a part in 3D first. Selected rows are outlined in orange
+  with a tick (click the row, its box or **Select** again to deselect). Selecting a model also selects the materials
+  and textures it uses (read from the mesh the first time, then remembered).
 - **Fonts:** the game's fonts come out as the original `.ttf` / `.otf` files (Catalog → **Fonts**, or select a
   `Font` folder), in `2_Final_Export\Fonts`.
 - **Select the whole aircraft folder** so its meshes, materials and textures come out together. That's how textures
