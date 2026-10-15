@@ -399,9 +399,9 @@ class HelmetMap:
     RAISE = 1.55  # at the front: how far above the DCS rim the AC8 rim lands (units of the meshes, ~24 across)
     INSET = 0.35  # the AC8 rim used is this far inside its edge (the original paint spills past the edge)
     GRID = 3072   # resolution of the AC8 shell's lookup image
-    FRONT = (50, 90)  # degrees from the front: the raise is full up to the first, gone by the second
-    EASE = 5      # how many times wider than an overrun the strip it is eased in over is
-    SQUEEZE = 0.01  # radians: how far in from the AC8 edge paint that would run past it is eased in
+    FRONT = (35, 50)  # degrees from the front: the raise (and its rim warp) is full up to the first, gone by the second
+    ALONG = 0.05  # radians of rim the side stretch is evened out over
+    SQUEEZE = 0.02  # radians: how far in from the AC8 edge paint that would run past it is eased in
     UNDER = 0.03  # at the front: the strip of the AC8 design under the name that is stretched to the DCS edge
     SPREAD = 2    # how locally the pull follows the nearest bit of rim (higher: more local)
     FADE = (0.2, 0.7)  # the pull is full this far in from the rim, then fades out over this much (radians)
@@ -592,7 +592,28 @@ class HelmetMap:
         src = np.interp(np.arange(N), kd, ka)  # position along the AC8 loop for each DCS loop point
         i0 = np.floor(src).astype(int) % N
         fr = (src - np.floor(src))[:, None]
-        disp = la[i0] * (1 - fr) + la[(i0 + 1) % N] * fr - bd
+        disp_front = la[i0] * (1 - fr) + la[(i0 + 1) % N] * fr - bd
+        # Away from the front the design stays as lined up and is only ever stretched OUT: where the DCS edge
+        # reaches past the AC8 one, it reads the nearest bit of the AC8 edge (evened out along the rim);
+        # where the DCS edge is inside the AC8 one, nothing moves (the extra AC8 paint is simply cut off, never
+        # squeezed in).
+        gxb = np.clip(np.round((bd[:, 0] + lim) * scale).astype(int), 0, self.GRID - 1)
+        gyb = np.clip(np.round((bd[:, 1] + lim) * scale).astype(int), 0, self.GRID - 1)
+        out_ = ~inside[gyb, gxb]
+        disp_side = np.zeros_like(bd)
+        for s0 in range(0, N, 512):
+            d2 = ((bd[s0:s0 + 512, None] - ba[None]) ** 2).sum(2)
+            disp_side[s0:s0 + 512] = ba[np.argmin(d2, 1)] - bd[s0:s0 + 512]
+        disp_side[~out_] = 0
+        # even out along the rim (circular), keeping the ends of each overhang easing in from zero
+        sig_ = max(N * self.ALONG / (2 * np.pi), 1.0)
+        kk_ = np.exp(-0.5 * (np.arange(-int(3 * sig_), int(3 * sig_) + 1) / sig_) ** 2)
+        kk_ /= kk_.sum()
+        pw = len(kk_) // 2
+        disp_side = np.stack([np.convolve(np.r_[disp_side[-pw:, c], disp_side[:, c], disp_side[:pw, c]], kk_,
+                                          mode="valid") for c in (0, 1)], 1)
+        wf_ = front_weight(np.arctan2(bd[:, 1], bd[:, 0]))[:, None]
+        disp = wf_ * disp_front + (1 - wf_) * disp_side
         G = 384
         gx_, gy_ = np.meshgrid(np.linspace(-lim, lim, G), np.linspace(-lim, lim, G))
         cells = np.stack([gx_.ravel(), gy_.ravel()], 1)
@@ -680,34 +701,6 @@ class HelmetMap:
             dv = (D[j0, i0] * (1 - ax) * (1 - ay) + D[j0, i0 + 1] * ax * (1 - ay)
                   + D[j0 + 1, i0] * (1 - ax) * ay + D[j0 + 1, i0 + 1] * ax * ay)
             qx_all[sl], qy_all[sl] = px + dv[:, 0], py + dv[:, 1]
-
-        # 2. in the few directions where the warp would still run past the AC8 edge (where the two outlines turn
-        # differently), the design is eased in along that direction over a band a few times wider than the
-        # overrun, so it is squeezed a little over a wide strip instead of a lot right at the edge
-        nb = 1440
-        qa_ = np.arctan2(qy_all, qx_all)
-        rho = np.hypot(qx_all, qy_all) / np.maximum(ray_at(qa_) - 0.004, 1e-6)
-        bins_ = ((qa_ + np.pi) / (2 * np.pi) * nb).astype(int) % nb
-        mx = np.ones(nb)
-        np.maximum.at(mx, bins_, rho)
-        wn = 12   # (each bin is a quarter degree)
-        ext = np.r_[mx[-2 * wn:], mx, mx[:2 * wn]]
-        mx = np.max(np.stack([ext[i:i + nb] for i in range(4 * wn + 1)]), 0)  # widen each peak, then soften it
-        kk = np.exp(-0.5 * (np.arange(-wn, wn + 1) / (wn / 2)) ** 2)
-        mx = np.convolve(np.r_[mx[-wn:], mx, mx[:wn]], kk / kk.sum(), mode="valid")
-        mx = np.maximum(mx, 1.0)
-        m_ = np.interp((qa_ + np.pi) / (2 * np.pi) * nb - 0.5, np.arange(-1, nb + 1), np.r_[mx[-1], mx, mx[0]])
-        over_ = m_ > 1.0005
-        if over_.any():
-            m_o = m_[over_]
-            r0 = np.maximum(1 - self.EASE * (m_o - 1), 0.3)
-            beta = (m_o - r0) / (1 - r0)
-            x_ = np.clip((rho[over_] - r0) / (m_o - r0), 0, None)
-            h_ = np.where(x_ < 1, beta * x_ + (1 - beta) * x_ * x_, 1 + 0 * x_)
-            new_rho = np.where(rho[over_] > r0, r0 + (1 - r0) * h_, rho[over_])
-            fac = new_rho / np.maximum(rho[over_], 1e-9)
-            qx_all[over_] *= fac
-            qy_all[over_] *= fac
 
         # 3. read the AC8 UV (and triangle) there
         uv_a = np.zeros((n_all, 2), np.float32)
