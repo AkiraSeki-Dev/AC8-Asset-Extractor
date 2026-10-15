@@ -29,6 +29,11 @@ from PIL import Image
 
 HERE = Path(__file__).resolve().parent
 HELMET_DATA = HERE / "assets" / "helmet_f18.npz"
+# the DCS helmets the AC8 pilot helmet can go onto: key -> (name, the two shells lined up, default file name)
+AIRCRAFT = {
+    "f18": ("F/A-18", HERE / "assets" / "helmet_f18.npz", "pilot_F18_helmet"),
+    "f14": ("F-14", HERE / "assets" / "helmet_f14.npz", "pilot_F14_helmet"),
+}
 IMAGE_EXTS = {".png", ".tga", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".dds"}
 
 # name endings -> role (lower-case, without spaces / dashes / underscores); two-word endings are tried first
@@ -982,7 +987,7 @@ class HelmetMap:
 
 
 def helmet(out, ac8_color=None, ac8_normal=None, ac8_mro=None, dcs_color=None, dcs_normal=None,
-           dcs_roughmet=None, fmt=None, raise_=HelmetMap.RAISE, log=print, name=None):
+           dcs_roughmet=None, fmt=None, raise_=HelmetMap.RAISE, log=print, name=None, aircraft="f18"):
     """The helmet converter. The DCS files (optional) keep everything but the shell; the results get their
     names (and format, unless fmt is given), or, with name, <name>, <name>_Roughmet and <name>_Normal.
     Returns the paths written."""
@@ -991,14 +996,16 @@ def helmet(out, ac8_color=None, ac8_normal=None, ac8_mro=None, dcs_color=None, d
     name = re.sub(r"\.(png|tga|dds|tif|tiff)$", "", name, flags=re.I)
     name = re.sub(r"_(roughmet|normal|nm)$", "", name, flags=re.I)
     size = next((max(Image.open(p).size) for p in (dcs_color, dcs_normal, dcs_roughmet) if p), 4096)
-    hm = HelmetMap(size, raise_=raise_, log=log)
+    label, data, default_stem = AIRCRAFT[aircraft]
+    log(f"Helmet: AC8 → DCS {label} helmet")
+    hm = HelmetMap(size, data=data, raise_=raise_, log=log)
     written = []
     for src, base, suffix, fn, kind in ((ac8_color, dcs_color, "", hm.color, "color"),
                                         (ac8_mro, dcs_roughmet, "_Roughmet", hm.roughmet, "roughmet"),
                                         (ac8_normal, dcs_normal, "_Normal", hm.normal, "normal")):
         if not src:
             continue
-        stem = name + suffix if name else (Path(base).stem if base else "pilot_F18_helmet" + suffix)
+        stem = name + suffix if name else (Path(base).stem if base else default_stem + suffix)
         log(f"Helmet: {Path(src).name} -> {stem}")
         im = fn(src, base)
         f = fmt or (Path(base).suffix.lower().lstrip(".").replace("tiff", "tif") if base else "png")
@@ -1039,6 +1046,7 @@ def main(argv):
         p.add_argument("--" + k)
     p.add_argument("--format", choices=["png", "tga", "dds"])
     p.add_argument("--name", help="file name for the results (_Roughmet / _Normal are added)")
+    p.add_argument("--aircraft", choices=sorted(AIRCRAFT), default="f18", help="which DCS helmet")
     p.add_argument("--raise", dest="raise_", default=str(HelmetMap.RAISE),
                    help="move the AC8 design up on the DCS helmet: FRONT[,BACK] (0 = as lined up)")
     a = ap.parse_args(argv)
@@ -1054,7 +1062,7 @@ def main(argv):
         reformat(a.folder, a.format, log)
         return 0
     return 0 if helmet(a.out, a.ac8_color, a.ac8_normal, a.ac8_mro, a.dcs_color, a.dcs_normal, a.dcs_roughmet,
-                       a.format, float(a.raise_.split(",")[0]), log, a.name) else 1
+                       a.format, float(a.raise_.split(",")[0]), log, a.name, a.aircraft) else 1
 
 
 if __name__ == "__main__":

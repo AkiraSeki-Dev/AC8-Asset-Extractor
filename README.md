@@ -103,8 +103,8 @@ The **DCS** tab has the tools for DCS World mods:
   in for you), and give it a
   **Name** (the suffixes are added). **Whole folder:** pick an extraction (AC8 modes) or any folder and every set in
   it is converted. **Save as** DDS (compressed, with mipmaps), PNG or TGA.
-- **F/A-18 pilot helmet (AC8 → DCS):** moves an Ace Combat 8 pilot helmet's colour, normal and metal/rough maps
-  onto the DCS F/A-18 helmet's UV layout. Pick the AC8 colour map (`T_…_Helmet…_C`); the others are found next to
+- **Pilot helmet (AC8 → DCS):** moves an Ace Combat 8 pilot helmet's colour, normal and metal/rough maps
+  onto a DCS pilot helmet's UV layout: pick the **Aircraft** (F/A-18C or F-14). Pick the AC8 colour map (`T_…_Helmet…_C`); the others are found next to
   it (or drag the files from Explorer onto the slots). Give the DCS helmet's own textures to keep its visor and straps (the results get their names). About a
   minute or two. The design flows in smooth curves out to the DCS helmet's edge (the original texture's spill past
   the mesh edge isn't used); AC8's painted strap slots are carried across as they are, to touch up in your editor;
@@ -128,6 +128,11 @@ AC8 Asset Extractor\
       extraction_info.txt     what was selected, when, and counts
       extraction_log.txt      the full log
 ```
+
+## Layout
+
+The **Windows** menu (top right) shows or hides the **Logs** (below the pages; drag the divider above it to
+resize, ✕ to close) and the **Extractions** list. The app opens on the **Catalog**.
 
 ## Updating
 

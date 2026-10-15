@@ -986,6 +986,33 @@ class Dropdown(tk.Frame):
             self.command()
 
 
+class ToggleMenu(Dropdown):
+    """A dropdown of things to show or hide (the Windows menu): picking one flips it."""
+
+    def __init__(self, parent, title, items, on_toggle):
+        self._items, self._on_toggle = items, on_toggle   # items: [(key, label, BooleanVar)]
+        super().__init__(parent, title, tk.StringVar(value=""), self._opts(), width=0)
+        self.val.configure(width=0)
+        for _k, _l, var in items:
+            var.trace_add("write", lambda *_: self.set_options(self._opts()))
+
+    def _opts(self):
+        return [(k, f"{'✓' if var.get() else '   '}  {label}") for k, label, var in self._items]
+
+    def set_options(self, options):
+        self.options = list(options)
+        self._show()
+
+    def _show(self):
+        self.val.configure(text="", fg=C["text1"])
+
+    def _pick(self, value):
+        for k, _l, var in self._items:
+            if k == value:
+                var.set(not var.get())
+        self._on_toggle()
+
+
 class Pill(tk.Label):
     def __init__(self, parent, text, kind="accent"):
         bg, fg, line = {"accent": (C["accent_tint"], C["accent"], C["accent_line"]),
@@ -1090,7 +1117,7 @@ class App(tk.Tk):
         self.sel_folder = None     # extraction card picked (Textures tab source)
         self.cat_data = None       # catalog built from the asset list
         self.history = load_history()  # {"updates": [{"date", "added": [keys], "removed": n}, ...]}
-        self.tab = "assets"
+        self.tab = "catalog"
         self.thumbs = {}           # path -> PhotoImage
         self.scroll_canvases = []
         self.card_widgets = []
@@ -1105,7 +1132,7 @@ class App(tk.Tk):
         self.partial = set()    # every folder that has something ticked inside it
         self._search_job = None
 
-        s = self._load_settings()
+        s = self.settings = self._load_settings()
         self.v_game = tk.StringVar(value=s.get("game_dir", ""))
         self.v_key = tk.StringVar(value=self._read_key_file())
         self.v_search = tk.StringVar(value="")
@@ -1238,6 +1265,11 @@ class App(tk.Tk):
         self.dd_type = Dropdown(bar, "Type", self.v_type, TYPES, width=13, command=self._on_type)
         self.dd_type.pack(side="left", padx=(6, 0))
         Button(bar, "Settings", self.open_settings, icon="⚙").pack(side="right", padx=(14, 0))
+        self.v_show_logs = tk.BooleanVar(value=self.settings.get("show_logs", True))
+        self.v_show_extr = tk.BooleanVar(value=self.settings.get("show_extractions", True))
+        ToggleMenu(bar, "Windows", [("logs", "Logs", self.v_show_logs),
+                                    ("extr", "Extractions", self.v_show_extr)],
+                   self._windows_changed).pack(side="right", padx=(14, 0))
 
         tb = tk.Frame(top, bg=C["bg1"], padx=18)
         tb.pack(fill="x", pady=(0, 10))
@@ -1299,13 +1331,21 @@ class App(tk.Tk):
             lbl.pack(side="left")
             lbl.bind("<Button-1>", lambda e, k=key: self.show_tab(k))
             self.tab_labels[key] = lbl
-        self.tab_labels["assets"].configure(fg=C["accent"])
+        self.tab_labels[self.tab].configure(fg=C["accent"])
         tk.Frame(self, bg=C["border1"], height=1).pack(fill="x", padx=18)
 
+        # status line (always shown) at the very bottom
+        bottom = tk.Frame(self, bg=C["bg1"], padx=18, pady=8)
+        bottom.pack(side="bottom", fill="x")
+        tk.Frame(self, bg=C["border1"], height=1).pack(side="bottom", fill="x")
+        # pages above, the log below them (drag the divider; Windows menu or ✕ hides it)
+        self.vsplit = tk.PanedWindow(self, orient="vertical", bg=C["bg0"], sashwidth=8, bd=0,
+                                     sashrelief="flat", showhandle=False, sashcursor="sb_v_double_arrow")
+        self.vsplit.pack(fill="both", expand=True, padx=18, pady=(10, 6))
         # body: (assets | catalog | textures) | extractions
-        self.body = tk.PanedWindow(self, orient="horizontal", bg=C["bg0"], sashwidth=10, bd=0,
+        self.body = tk.PanedWindow(self.vsplit, orient="horizontal", bg=C["bg0"], sashwidth=10, bd=0,
                                    sashrelief="flat", showhandle=False)
-        self.body.pack(fill="both", expand=True, padx=18, pady=(10, 0))
+        self.vsplit.add(self.body, stretch="always", minsize=round(260 * SCALE))
         self._build_browser()
         self._build_catalog()
         self._build_textures()
@@ -1313,9 +1353,6 @@ class App(tk.Tk):
         self._build_viewer_pane()
         self._build_extractions()
 
-        tk.Frame(self, bg=C["border1"], height=1).pack(fill="x", pady=(12, 0))
-        bottom = tk.Frame(self, bg=C["bg1"], padx=18, pady=8)
-        bottom.pack(fill="x")
         row = tk.Frame(bottom, bg=C["bg1"])
         row.pack(fill="x")
         self.step_dot = tk.Label(row, text="●", bg=C["bg1"], fg=C["text3"], font=F["small"])
@@ -1327,10 +1364,17 @@ class App(tk.Tk):
         lk.bind("<Button-1>", lambda e: open_folder(LOGS_DIR))
         tk.Label(row, textvariable=self.v_status, bg=C["bg1"], fg=C["text3"], font=F["mono_s"]).pack(side="right")
         self.progress = Progress(bottom)
-        self.progress.pack(fill="x", pady=(6, 6))
-        logbox = tk.Frame(bottom, bg=C["bg0"], highlightthickness=1, highlightbackground=C["border2"])
-        logbox.pack(fill="x")
-        self.log = tk.Text(logbox, height=7, bg=C["bg0"], fg=C["text2"], font=F["mono"], bd=0, relief="flat",
+        self.progress.pack(fill="x", pady=(6, 0))
+        self.log_pane = tk.Frame(self.vsplit, bg=C["bg0"])
+        head = tk.Frame(self.log_pane, bg=C["bg0"])
+        head.pack(fill="x", pady=(2, 4))
+        tk.Label(head, text="LOG", bg=C["bg0"], fg=C["text2"], font=F["section"]).pack(side="left")
+        x_ = tk.Label(head, text="✕", bg=C["bg0"], fg=C["text3"], font=F["small"], cursor="hand2", padx=6)
+        x_.pack(side="right")
+        x_.bind("<Button-1>", lambda e: (self.v_show_logs.set(False), self._windows_changed()))
+        logbox = tk.Frame(self.log_pane, bg=C["bg0"], highlightthickness=1, highlightbackground=C["border2"])
+        logbox.pack(fill="both", expand=True)
+        self.log = tk.Text(logbox, height=4, bg=C["bg0"], fg=C["text2"], font=F["mono"], bd=0, relief="flat",
                            wrap="word", padx=12, pady=6, insertbackground=C["accent"],
                            selectbackground=C["accent_cc"], highlightthickness=0, state="disabled")
         lsb = ttk.Scrollbar(logbox, orient="vertical", command=self.log.yview, style="Dark.Vertical.TScrollbar")
@@ -1339,6 +1383,9 @@ class App(tk.Tk):
         self.log.pack(side="left", fill="both", expand=True)
         for tag, col in (("ok", C["ok"]), ("err", C["accent"]), ("cmd", C["text3"]), ("warn", C["warn"])):
             self.log.tag_configure(tag, foreground=col)
+        self._log_height = int(self.settings.get("log_height", round(170 * SCALE)))
+        self.after_idle(self._windows_changed)
+        self.after_idle(lambda: self.show_tab(self.tab))
 
     def _panel(self, title, var, link=None):
         frame = tk.Frame(self.body, bg=C["bg0"])
@@ -2063,7 +2110,10 @@ class App(tk.Tk):
                 "catalog_list_width": self._cat_list_width(),
                 "bake_size": self.v_bake_size.get(), "bake_normal": self.v_bake_normal.get(), "view_mode": self.v_view_mode.get() if not self.v_view_mode.get().startswith("tex_") else "lit", "view_grid": self.v_view_grid.get(),
                 "view_bg": self.v_view_bg.get(),
-                "keep_raw": self.v_keep_raw.get(), "dcs": self.dcs_cfg}
+                "keep_raw": self.v_keep_raw.get(), "dcs": self.dcs_cfg,
+                "show_logs": self.v_show_logs.get(), "show_extractions": self.v_show_extr.get(),
+                "log_height": (self.log_pane.winfo_height() if self.v_show_logs.get()
+                               and self.log_pane.winfo_height() > 20 else self._log_height)}
         try:
             SETTINGS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except OSError:
@@ -2108,7 +2158,7 @@ class App(tk.Tk):
             problems.append("game folder not set")
         if problems:
             self.v_notice.set("Setup needed: " + " · ".join(problems))
-            self.notice.pack(fill="x", padx=18, pady=(12, 0), before=self.body)
+            self.notice.pack(fill="x", padx=18, pady=(12, 0), before=self.vsplit)
         else:
             self.notice.pack_forget()
 
@@ -2906,7 +2956,7 @@ class App(tk.Tk):
             self.upd_btn_tools.pack(side="right", padx=(0, 6), pady=5)
         if app_new:
             self.upd_btn_app.pack(side="right", padx=(0, 6), pady=5)
-        self.upd_bar.pack(fill="x", padx=18, pady=(12, 0), before=self.body)
+        self.upd_bar.pack(fill="x", padx=18, pady=(12, 0), before=self.vsplit)
         for p_ in parts:
             self.post("log", f"Update available: {p_}")
 
@@ -2949,14 +2999,27 @@ class App(tk.Tk):
 
     # ================================================================== tabs
 
+    def _windows_changed(self):
+        """Windows menu: show or hide the log (below the pages) and the extractions list (beside them)."""
+        shown = str(self.log_pane) in [str(p) for p in self.vsplit.panes()]
+        if self.v_show_logs.get() and not shown:
+            self.vsplit.add(self.log_pane, minsize=round(70 * SCALE), height=self._log_height, stretch="never")
+        elif not self.v_show_logs.get() and shown:
+            self._log_height = max(self.log_pane.winfo_height(), round(70 * SCALE))
+            self.vsplit.forget(self.log_pane)
+        if hasattr(self, "tab"):
+            self._force_layout = True
+            self.show_tab(self.tab)
+
     def show_tab(self, key):
         if key != "viewer" and self.glv is not None:
             self.glv.set_fly(False)
         panes = {"assets": self.pane_assets, "catalog": self.pane_catalog, "textures": self.pane_textures,
                  "viewer": self.pane_viewer, "dcs": self.pane_dcs}
         new = panes[key]
-        want_extr = key != "viewer"  # the viewer gets the whole width
-        if new is not self._left_pane or want_extr != self._extr_shown:
+        want_extr = key != "viewer" and self.v_show_extr.get()  # the viewer gets the whole width
+        if new is not self._left_pane or want_extr != self._extr_shown or getattr(self, "_force_layout", False):
+            self._force_layout = False
             if self._left_pane is not self.pane_viewer:
                 w = self._left_pane.winfo_width()
                 self._left_width = w if w > 50 else getattr(self, "_left_width", 0)
@@ -5817,10 +5880,16 @@ class App(tk.Tk):
                font=F["small"], padx=10, pady=3).pack(side="left", padx=(8, 0))
 
         # --- helmet
-        f2 = section("F/A-18 PILOT HELMET  (AC8 → DCS)",
-                     "Moves an Ace Combat 8 pilot helmet's textures onto the DCS F/A-18 helmet's UV layout (the helmet "
+        f2 = section("PILOT HELMET  (AC8 → DCS)",
+                     "Moves an Ace Combat 8 pilot helmet's textures onto a DCS pilot helmet's UV layout (the helmet "
                      "shell). Pick the AC8 colour map: its normal and metal/rough maps are found next to it. Give the "
                      "DCS helmet's own textures to keep its visor, straps and the rest (the results get their names).")
+        self.v_helmet_aircraft = tk.StringVar(value=cfg.get("helmet_aircraft", "f18"))
+        arow = tk.Frame(f2, bg=C["bg1"])
+        arow.pack(fill="x", pady=(10, 0))
+        Dropdown(arow, "Aircraft", self.v_helmet_aircraft,
+                 [("f18", "F/A-18C  (HGU-68/P helmet)"), ("f14", "F-14  (HGU-55/P helmet)")],
+                 width=14, command=self._helmet_aircraft_changed).pack(side="left")
         self.helmet_vars = {k: tk.StringVar(value="") for k, *_ in self.HELMET_SLOTS}
         for side, title in (("ac8", "ACE COMBAT 8"), ("dcs", "DCS HELMET  (optional)")):
             tk.Label(f2, text=title, bg=C["bg1"], fg=C["text2"], font=F["tiny"], anchor="w").pack(fill="x",
@@ -5837,7 +5906,7 @@ class App(tk.Tk):
         tk.Label(row, text="NAME", bg=C["bg1"], fg=C["text3"], font=F["tiny"], width=8, anchor="w").pack(side="left")
         tk.Label(row, text="+ _Roughmet / _Normal", bg=C["bg1"], fg=C["text3"], font=F["small"]).pack(side="right")
         Input(row, self.v_helmet_name, mono=True,
-              placeholder="Leave empty for the DCS files' names (or pilot_F18_helmet)").pack(
+              placeholder="Leave empty for the DCS files' names (or pilot_<aircraft>_helmet)").pack(
             side="left", fill="x", expand=True, padx=(0, 8))
         row = tk.Frame(f2, bg=C["bg1"])
         row.pack(fill="x", pady=(8, 0))
@@ -5846,10 +5915,10 @@ class App(tk.Tk):
                  width=20).pack(side="left")
         # the DCS helmet's brow pad covers the bottom of the AC8 name at the front: move the front of the design up
         # (older settings were "FRONT,BACK" and fall back to the default)
-        raise_opts = [("0", "No"), ("0.8", "A little"), ("1.55", "Name clear of the brow pad  (default)"),
+        raise_opts = [("0", "No  (F-14 default)"), ("0.8", "A little"), ("1.55", "Name clear of the brow pad  (F/A-18 default)"),
                       ("2.2", "More")]
-        saved = cfg.get("helmet_raise", "1.55")
-        self.v_helmet_raise = tk.StringVar(value=saved if saved in dict(raise_opts) else "1.55")
+        self._raise_opts = dict(raise_opts)
+        self.v_helmet_raise = tk.StringVar(value=self._helmet_raise_for(self.v_helmet_aircraft.get()))
         Dropdown(row, "Move design up", self.v_helmet_raise, raise_opts, width=12).pack(side="left", padx=(6, 0))
         act2 = tk.Frame(f2, bg=C["bg1"])
         act2.pack(fill="x", pady=(10, 0))
@@ -6207,6 +6276,16 @@ class App(tk.Tk):
 
         self._start(work, f"{label}…")
 
+    HELMET_RAISE_DEFAULT = {"f18": "1.55", "f14": "0"}  # the F-14 helmet's brow edge matches AC8's
+
+    def _helmet_raise_for(self, ac):
+        saved = self.dcs_cfg.get(f"helmet_raise_{ac}") or (self.dcs_cfg.get("helmet_raise") if ac == "f18" else None)
+        return saved if saved in self._raise_opts else self.HELMET_RAISE_DEFAULT.get(ac, "0")
+
+    def _helmet_aircraft_changed(self):
+        self.dcs_cfg["helmet_aircraft"] = self.v_helmet_aircraft.get()
+        self.v_helmet_raise.set(self._helmet_raise_for(self.v_helmet_aircraft.get()))
+
     def helmet_convert(self):
         v = {k: (var.get() or None) for k, var in self.helmet_vars.items()}
         if not any(v[k] for k in ("ac8_color", "ac8_normal", "ac8_mro")):
@@ -6217,8 +6296,11 @@ class App(tk.Tk):
         self.v_helmet_out.set(out)
         fmt = self.v_helmet_fmt.get()
         name = self.v_helmet_name.get().strip()
-        self.dcs_cfg.update(helmet_out=out, helmet_fmt=fmt, helmet_raise=self.v_helmet_raise.get(), helmet_name=name)
-        cmd = [console_python(), "-u", DCS_SCRIPT, "helmet", "--out", out, "--raise", self.v_helmet_raise.get()]
+        ac = self.v_helmet_aircraft.get()
+        self.dcs_cfg.update(helmet_out=out, helmet_fmt=fmt, helmet_name=name, helmet_aircraft=ac)
+        self.dcs_cfg[f"helmet_raise_{ac}"] = self.v_helmet_raise.get()
+        cmd = [console_python(), "-u", DCS_SCRIPT, "helmet", "--out", out, "--raise", self.v_helmet_raise.get(),
+               "--aircraft", ac]
         if name:
             cmd += ["--name", name]
         for k, val in v.items():
