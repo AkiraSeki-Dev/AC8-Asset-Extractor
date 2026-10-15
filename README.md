@@ -148,6 +148,11 @@ AC8 Asset Extractor\
 
 ## Version history
 
+v1.3.10: drag and drop on the DCS page.
+- Drag images from Explorer onto the texture slots (One set and the helmet converter), and folders onto the
+  input / output bars.
+- One set's **Name** follows the latest map you put in (edit it before converting if you like).
+
 v1.3.9:
 - Settings → APP → **Update to**: pick whether the updater follows **Release** or **Test build**.
 - DCS page › One set: the slots are grouped under the file they go into (e.g. **→ Wing_Roughmet** R AO · G
