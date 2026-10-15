@@ -914,24 +914,29 @@ class HelmetMap:
 
 
 def helmet(out, ac8_color=None, ac8_normal=None, ac8_mro=None, dcs_color=None, dcs_normal=None,
-           dcs_roughmet=None, fmt=None, raise_=HelmetMap.RAISE, log=print):
+           dcs_roughmet=None, fmt=None, raise_=HelmetMap.RAISE, log=print, name=None):
     """The helmet converter. The DCS files (optional) keep everything but the shell; the results get their
-    names (and format, unless fmt is given). Returns the paths written."""
+    names (and format, unless fmt is given), or, with name, <name>, <name>_Roughmet and <name>_Normal.
+    Returns the paths written."""
     out = Path(out)
+    name = re.sub(r'[<>:"/\\|?*]', "_", (name or "").strip()).strip(" .")
+    name = re.sub(r"\.(png|tga|dds|tif|tiff)$", "", name, flags=re.I)
+    name = re.sub(r"_(roughmet|normal|nm)$", "", name, flags=re.I)
     size = next((max(Image.open(p).size) for p in (dcs_color, dcs_normal, dcs_roughmet) if p), 4096)
     hm = HelmetMap(size, raise_=raise_, log=log)
     written = []
-    for src, base, default, fn, kind in ((ac8_color, dcs_color, "pilot_F18_helmet", hm.color, "color"),
-                                         (ac8_mro, dcs_roughmet, "pilot_F18_helmet_Roughmet", hm.roughmet, "data"),
-                                         (ac8_normal, dcs_normal, "pilot_F18_helmet_Normal", hm.normal, "normal")):
+    for src, base, suffix, fn, kind in ((ac8_color, dcs_color, "", hm.color, "color"),
+                                        (ac8_mro, dcs_roughmet, "_Roughmet", hm.roughmet, "data"),
+                                        (ac8_normal, dcs_normal, "_Normal", hm.normal, "normal")):
         if not src:
             continue
-        log(f"Helmet: {Path(src).name} -> {Path(base).name if base else default}")
+        stem = name + suffix if name else (Path(base).stem if base else "pilot_F18_helmet" + suffix)
+        log(f"Helmet: {Path(src).name} -> {stem}")
         im = fn(src, base)
         f = fmt or (Path(base).suffix.lower().lstrip(".").replace("tiff", "tif") if base else "png")
         if f not in ("png", "tga", "dds"):
             f = "png"
-        written.append(save_img(im, out / (Path(base).stem if base else default), f, kind))
+        written.append(save_img(im, out / stem, f, kind))
     log(f"Helmet done: {', '.join(p.name for p in written)} in {out}")
     return written
 
@@ -956,6 +961,7 @@ def main(argv):
     for k in ("ac8-color", "ac8-normal", "ac8-mro", "dcs-color", "dcs-normal", "dcs-roughmet"):
         p.add_argument("--" + k)
     p.add_argument("--format", choices=["png", "tga", "dds"])
+    p.add_argument("--name", help="file name for the results (_Roughmet / _Normal are added)")
     p.add_argument("--raise", dest="raise_", default=str(HelmetMap.RAISE),
                    help="move the AC8 design up on the DCS helmet: FRONT[,BACK] (0 = as lined up)")
     a = ap.parse_args(argv)
@@ -968,7 +974,7 @@ def main(argv):
         reformat(a.folder, a.format, log)
         return 0
     return 0 if helmet(a.out, a.ac8_color, a.ac8_normal, a.ac8_mro, a.dcs_color, a.dcs_normal, a.dcs_roughmet,
-                       a.format, float(a.raise_.split(",")[0]), log) else 1
+                       a.format, float(a.raise_.split(",")[0]), log, a.name) else 1
 
 
 if __name__ == "__main__":

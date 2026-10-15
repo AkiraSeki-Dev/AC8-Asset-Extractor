@@ -5696,6 +5696,14 @@ class App(tk.Tk):
         self.v_helmet_out = tk.StringVar(value=cfg.get("helmet_out", ""))
         self.v_helmet_fmt = tk.StringVar(value=cfg.get("helmet_fmt", "same"))
         path_row(f2, "OUTPUT", self.v_helmet_out, lambda: self._dcs_browse(self.v_helmet_out, False))
+        self.v_helmet_name = tk.StringVar(value=cfg.get("helmet_name", ""))
+        row = tk.Frame(f2, bg=C["bg1"])
+        row.pack(fill="x", pady=(6, 0))
+        tk.Label(row, text="NAME", bg=C["bg1"], fg=C["text3"], font=F["tiny"], width=8, anchor="w").pack(side="left")
+        tk.Label(row, text="+ _Roughmet / _Normal", bg=C["bg1"], fg=C["text3"], font=F["small"]).pack(side="right")
+        Input(row, self.v_helmet_name, mono=True,
+              placeholder="Leave empty for the DCS files' names (or pilot_F18_helmet)").pack(
+            side="left", fill="x", expand=True, padx=(0, 8))
         row = tk.Frame(f2, bg=C["bg1"])
         row.pack(fill="x", pady=(8, 0))
         Dropdown(row, "Save as", self.v_helmet_fmt, [("same", "Same as the DCS files"), ("png", "PNG"),
@@ -5886,8 +5894,11 @@ class App(tk.Tk):
                                                      / "DCS_Helmet")
         self.v_helmet_out.set(out)
         fmt = self.v_helmet_fmt.get()
-        self.dcs_cfg.update(helmet_out=out, helmet_fmt=fmt, helmet_raise=self.v_helmet_raise.get())
+        name = self.v_helmet_name.get().strip()
+        self.dcs_cfg.update(helmet_out=out, helmet_fmt=fmt, helmet_raise=self.v_helmet_raise.get(), helmet_name=name)
         cmd = [console_python(), "-u", DCS_SCRIPT, "helmet", "--out", out, "--raise", self.v_helmet_raise.get()]
+        if name:
+            cmd += ["--name", name]
         for k, val in v.items():
             if val:
                 cmd += ["--" + k.replace("_", "-"), val]

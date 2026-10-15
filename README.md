@@ -104,7 +104,8 @@ The **DCS** tab has the tools for DCS World mods:
   it. Give the DCS helmet's own textures to keep its visor and straps (the results get their names). About a
   minute or two. The design flows in smooth curves out to the DCS helmet's edge (the original texture's spill past
   the mesh edge isn't used); AC8's painted strap slots are carried across as they are, to touch up in your editor;
-  **Move design up** lifts the front of the design so the name clears the DCS helmet's brow pad.
+  **Move design up** lifts the front of the design so the name clears the DCS helmet's brow pad; **Name** sets
+  the files' name (_Roughmet and _Normal are added), otherwise they're named after the DCS files.
 
 ## Where things go
 
