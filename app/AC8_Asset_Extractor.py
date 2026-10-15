@@ -1029,6 +1029,12 @@ class App(tk.Tk):
         self.v_pbr_auto = tk.StringVar(value=s.get("pbr_auto", "separate"))      # separate maps (Blender / Substance)
         self.v_pbr_preset = tk.StringVar(value=s.get("pbr_preset", "separate"))
         self.v_pbr_normal = tk.StringVar(value=s.get("pbr_normal", "auto"))
+        # which builds the updater follows: releases or the test builds (starts as the channel this copy came from)
+        ch = s.get("update_channel", BUILD.get("channel", "live"))
+        self.v_update_channel = tk.StringVar(value=ch if ch in ("live", "test") else "live")
+        self._update_channel = self.v_update_channel.get()   # (read by the update checks' threads)
+        self.v_update_channel.trace_add("write", lambda *_: setattr(self, "_update_channel",
+                                                                    self.v_update_channel.get()))
         self.dcs_cfg = dict(s.get("dcs", {}))  # the DCS page's folders and options
         self.settings_cat_width = int(s.get("catalog_list_width", 0) or 0)
         self._steam_prev = dict(s.get("steam_prev_launch", {}))  # localconfig.vdf -> launch options before ours
@@ -1843,11 +1849,14 @@ class App(tk.Tk):
         row = tk.Frame(box, bg=C["bg1"])
         row.pack(fill="x", pady=3)
         label(row, "Version")
-        tk.Label(row, text=f"v{VERSION_LABEL}" + ("  (test builds)" if IS_TEST else ""), bg=C["bg1"], fg=C["text1"], font=F["base"]).pack(side="left")
+        tk.Label(row, text=f"v{VERSION_LABEL}" + ("  (test build)" if IS_TEST else ""), bg=C["bg1"], fg=C["text1"],
+                 font=F["base"]).pack(side="left")
         rel = tk.Label(row, text="  release notes", bg=C["bg1"], fg=C["accent"], font=F["small"], cursor="hand2")
         rel.pack(side="left")
         rel.bind("<Button-1>", lambda e: __import__("webbrowser").open(__import__("ac8_update").RELEASES_PAGE))
         Button(row, "Check for updates", self.update_app, font=F["small"], padx=10, pady=4).pack(side="right")
+        Dropdown(row, "Update to", self.v_update_channel, [("live", "Release"), ("test", "Test build")],
+                 width=10).pack(side="right", padx=(0, 6))
         row = tk.Frame(box, bg=C["bg1"])
         row.pack(fill="x", pady=3)
         label(row, "Support")
@@ -1958,7 +1967,7 @@ class App(tk.Tk):
                 "convert": self.v_convert.get(), "fbx": self.v_fbx.get(),
                 "max_texture": self.v_max_tex.get(),
                 "pbr_auto": self.v_pbr_auto.get(), "pbr_preset": self.v_pbr_preset.get(),
-                "pbr_normal": self.v_pbr_normal.get(), "bake_preset": self.v_bake_preset.get(),
+                "pbr_normal": self.v_pbr_normal.get(), "update_channel": self.v_update_channel.get(), "bake_preset": self.v_bake_preset.get(),
                 "keep_previews": self.v_keep_previews.get(), "steam_prev_launch": self._steam_prev,
                 "catalog_list_width": self._cat_list_width(),
                 "bake_size": self.v_bake_size.get(), "bake_normal": self.v_bake_normal.get(), "view_mode": self.v_view_mode.get() if not self.v_view_mode.get().startswith("tex_") else "lit", "view_grid": self.v_view_grid.get(),
@@ -2718,13 +2727,15 @@ class App(tk.Tk):
                 import ac8_tools
                 raise RuntimeError(f"Couldn't check for updates: {ac8_tools.friendly_error(e)}.")
             if not self._app_is_newer(info):
-                return f"✔ You have the latest {'test build' if IS_TEST else 'version'} (v{VERSION_LABEL})"
+                return f"✔ You have the latest {'test build' if info.get('channel') == 'test' else 'release'} " \
+                       f"(v{VERSION_LABEL})"
             box, ev = {}, threading.Event()
 
             def ask():
                 notes = info["notes"].strip()
                 box["ok"] = messagebox.askyesno(
-                    APP_NAME, f"{'Test build' if IS_TEST else 'Version'} v{info['version']} is available (you have v{VERSION_LABEL}).\n\n"
+                    APP_NAME, f"{'Test build' if info.get('channel') == 'test' else 'Release'} v{info['version']} is available "
+                              f"(you have v{VERSION_LABEL}{', a test build' if IS_TEST else ''}).\n\n"
                               + (notes[:900] + ("…" if len(notes) > 900 else "") + "\n\n" if notes else "")
                               + "Update now? Your settings, exports and asset list are kept. The app restarts "
                                 "afterwards.")
@@ -2741,16 +2752,20 @@ class App(tk.Tk):
 
         self._start(work, "Checking for app updates…")
 
-    @staticmethod
-    def _latest_app():
-        """The newest build on this copy's channel: the live release, or (test builds) the current test build."""
+    def _latest_app(self):
+        """The newest build on the channel picked in Settings (Update to): the release or the current test build."""
         import ac8_update
-        return ac8_update.latest_test() if IS_TEST else ac8_update.latest()
+        if self._update_channel == "test":
+            return dict(ac8_update.latest_test(), channel="test")
+        return dict(ac8_update.latest(), channel="live")
 
     @staticmethod
     def _app_is_newer(info):
+        """Worth offering: a newer build on the same channel, or any build of the other one (switching)."""
         import ac8_update
-        if IS_TEST:
+        if info.get("channel") != BUILD.get("channel", "live"):
+            return True
+        if info.get("channel") == "test":
             return info.get("build", 0) > BUILD.get("build", 0)
         return ac8_update.newer(info["version"], APP_VERSION)
 
