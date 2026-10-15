@@ -1334,10 +1334,6 @@ class App(tk.Tk):
         self.tab_labels[self.tab].configure(fg=C["accent"])
         tk.Frame(self, bg=C["border1"], height=1).pack(fill="x", padx=18)
 
-        # status line (always shown) at the very bottom
-        bottom = tk.Frame(self, bg=C["bg1"], padx=18, pady=8)
-        bottom.pack(side="bottom", fill="x")
-        tk.Frame(self, bg=C["border1"], height=1).pack(side="bottom", fill="x")
         # pages above, the log below them (drag the divider; Windows menu or ✕ hides it)
         self.vsplit = tk.PanedWindow(self, orient="vertical", bg=C["bg0"], sashwidth=8, bd=0,
                                      sashrelief="flat", showhandle=False, sashcursor="sb_v_double_arrow")
@@ -1353,25 +1349,26 @@ class App(tk.Tk):
         self._build_viewer_pane()
         self._build_extractions()
 
-        row = tk.Frame(bottom, bg=C["bg1"])
+        # the log pane: the status line and progress on top, the log text under them (all hidden together)
+        self.log_pane = tk.Frame(self.vsplit, bg=C["bg0"])
+        bar_ = tk.Frame(self.log_pane, bg=C["bg1"], padx=12, pady=6, highlightthickness=1,
+                        highlightbackground=C["border2"])
+        bar_.pack(fill="x", pady=(2, 4))
+        row = tk.Frame(bar_, bg=C["bg1"])
         row.pack(fill="x")
         self.step_dot = tk.Label(row, text="●", bg=C["bg1"], fg=C["text3"], font=F["small"])
         self.step_dot.pack(side="left")
         tk.Label(row, textvariable=self.v_step, bg=C["bg1"], fg=C["text1"], font=F["bold"]).pack(side="left",
                                                                                                 padx=(6, 0))
+        x_ = tk.Label(row, text="✕", bg=C["bg1"], fg=C["text3"], font=F["small"], cursor="hand2", padx=6)
+        x_.pack(side="right", padx=(8, 0))
+        x_.bind("<Button-1>", lambda e: (self.v_show_logs.set(False), self._windows_changed()))
         lk = tk.Label(row, text="Logs folder", bg=C["bg1"], fg=C["accent"], font=F["small"], cursor="hand2")
         lk.pack(side="right", padx=(12, 0))
         lk.bind("<Button-1>", lambda e: open_folder(LOGS_DIR))
         tk.Label(row, textvariable=self.v_status, bg=C["bg1"], fg=C["text3"], font=F["mono_s"]).pack(side="right")
-        self.progress = Progress(bottom)
+        self.progress = Progress(bar_)
         self.progress.pack(fill="x", pady=(6, 0))
-        self.log_pane = tk.Frame(self.vsplit, bg=C["bg0"])
-        head = tk.Frame(self.log_pane, bg=C["bg0"])
-        head.pack(fill="x", pady=(2, 4))
-        tk.Label(head, text="LOG", bg=C["bg0"], fg=C["text2"], font=F["section"]).pack(side="left")
-        x_ = tk.Label(head, text="✕", bg=C["bg0"], fg=C["text3"], font=F["small"], cursor="hand2", padx=6)
-        x_.pack(side="right")
-        x_.bind("<Button-1>", lambda e: (self.v_show_logs.set(False), self._windows_changed()))
         logbox = tk.Frame(self.log_pane, bg=C["bg0"], highlightthickness=1, highlightbackground=C["border2"])
         logbox.pack(fill="both", expand=True)
         self.log = tk.Text(logbox, height=4, bg=C["bg0"], fg=C["text2"], font=F["mono"], bd=0, relief="flat",
