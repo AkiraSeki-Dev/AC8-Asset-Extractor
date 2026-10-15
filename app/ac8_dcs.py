@@ -264,6 +264,69 @@ def convert(mode, src, out, fmt=None, normal="opengl", orm=False, log=print):
     return total
 
 
+# the slots of the one-set converter, per mode: (role, label)
+SET_SLOTS = {
+    "ac8": [("base", "Colour  (_C)"), ("normal", "Normal  (_N / _NO)"), ("mr", "Metal / rough  (_MRO / _MRX)"),
+            ("emissive", "Emissive  (_CE / _E)")],
+    "pbr_dcs": [("base", "Base colour"), ("opacity", "Opacity"), ("metallic", "Metallic"), ("roughness", "Roughness"),
+                ("ao", "Ambient occlusion"), ("orm", "ORM  (packed AO/R/M)"), ("normal", "Normal"),
+                ("emissive", "Emissive")],
+    "dcs_pbr": [("plain", "Diffuse"), ("roughmet", "Roughmet"), ("normal", "Normal  (_Normal / _nm)")],
+}
+
+
+def _to_fmt(paths, fmt):
+    """PNGs just written -> TGA / DDS (the PNG is removed). Returns the new paths."""
+    if fmt in (None, "png"):
+        return list(paths)
+    new = []
+    for p in paths:
+        p = Path(p)
+        _n, role = split_name(p.stem)
+        kind = "normal" if role and role.startswith("normal") else "data" if role in ("roughmet", "orm") else "color"
+        im = Image.open(p)
+        im.load()
+        new.append(save_img(im.convert("RGBA") if "A" in im.getbands() else im.convert("RGB"), p, fmt, kind))
+        p.unlink()
+    return new
+
+
+def convert_set(mode, slots, out, name, fmt=None, normal=None, orm=False, preset="separate", log=print):
+    """One texture set, its maps picked one by one. mode: ac8_pbr, ac8_dcs, pbr_dcs or dcs_pbr; slots: {role: path}
+    (roles from SET_SLOTS). Returns the paths written."""
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    slots = {k: Path(v) for k, v in slots.items() if v}
+    if not slots:
+        raise ValueError("no textures picked")
+    if mode.startswith("ac8"):
+        if str(HERE) not in sys.path:
+            sys.path.insert(0, str(HERE))
+        import ac8_pbr
+        roles = {}
+        for role, p in slots.items():
+            tail = p.stem.rsplit("_", 1)[-1].upper() if "_" in p.stem else ""
+            if role == "normal":
+                roles["normal_ao" if tail == "NO" else "normal"] = p
+            elif role == "mr":
+                roles["mr" if tail in ("MRX", "MR") else "mr_ao"] = p
+            else:
+                roles[role] = p
+        maps = ac8_pbr.unpack_set(roles)
+        if mode == "ac8_dcs":
+            files = _to_fmt(ac8_pbr.write_set(maps, out, name, "dcs"), fmt or "dds")
+        else:
+            files = _to_fmt(ac8_pbr.write_set(maps, out, name, preset, normal), fmt or "png")
+    elif mode == "pbr_dcs":
+        files = to_dcs(name, slots, out, fmt or "dds", normal or "opengl", log)
+    elif mode == "dcs_pbr":
+        files = to_pbr(name, slots, out, fmt or "png", normal or "opengl", orm, log)
+    else:
+        raise ValueError(mode)
+    log(f"{name}: " + ", ".join(Path(f).name for f in files))
+    return files
+
+
 def reformat(folder, fmt, log=print):
     """Every PNG in the folder (recursive) -> TGA / DDS; the PNG is removed. Names tell the DDS compression."""
     n = 0
@@ -953,6 +1016,15 @@ def main(argv):
         p.add_argument("--format", choices=["png", "tga", "dds"])
         p.add_argument("--normal", choices=["opengl", "directx"], default="opengl")
         p.add_argument("--orm", action="store_true")
+    p = sub.add_parser("set", help="one texture set, its maps picked one by one")
+    p.add_argument("--mode", choices=["ac8_pbr", "ac8_dcs", "pbr_dcs", "dcs_pbr"], required=True)
+    p.add_argument("--out", required=True)
+    p.add_argument("--name", required=True)
+    p.add_argument("--slot", action="append", default=[], help="ROLE=PATH")
+    p.add_argument("--format", choices=["png", "tga", "dds"])
+    p.add_argument("--normal", choices=["opengl", "directx"])
+    p.add_argument("--orm", action="store_true")
+    p.add_argument("--preset", default="separate")
     p = sub.add_parser("reformat")
     p.add_argument("folder")
     p.add_argument("--format", choices=["tga", "dds"], required=True)
@@ -970,6 +1042,9 @@ def main(argv):
         print(msg, flush=True)
     if a.cmd in ("to-dcs", "to-pbr"):
         return 0 if convert(a.cmd, a.src, a.out, a.format, a.normal, a.orm, log) else 1
+    if a.cmd == "set":
+        slots = dict(x.split("=", 1) for x in a.slot)
+        return 0 if convert_set(a.mode, slots, a.out, a.name, a.format, a.normal, a.orm, a.preset, log) else 1
     if a.cmd == "reformat":
         reformat(a.folder, a.format, log)
         return 0

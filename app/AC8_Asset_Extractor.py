@@ -5660,6 +5660,27 @@ class App(tk.Tk):
         self.dd_dcs_extr.pack(side="left")
         tk.Label(self.dcs_extr_row, text="or pick any folder below", bg=C["bg1"], fg=C["text3"],
                  font=F["small"]).pack(side="left", padx=(8, 0))
+        self.v_dcs_source = tk.StringVar(value=cfg.get("source", "set"))
+        self.dcs_source_row = tk.Frame(f, bg=C["bg1"])
+        self.dcs_source_row.pack(fill="x", pady=(8, 0))
+        Segmented(self.dcs_source_row, self.v_dcs_source,
+                  [("set", "One set  (pick each map)"), ("folder", "Whole folder")]).pack(side="left")
+        # one set: a slot per map, like the helmet converter
+        self.dcs_set = tk.Frame(f, bg=C["bg1"])
+        self.dcs_set_slots = tk.Frame(self.dcs_set, bg=C["bg1"])
+        self.dcs_set_slots.pack(fill="x", pady=(6, 0))
+        self.set_vars = {}   # group -> {role: StringVar}
+        self.v_set_name = tk.StringVar(value="")
+        self.v_set_out = tk.StringVar(value=cfg.get("set_out", ""))
+        path_row(self.dcs_set, "OUTPUT", self.v_set_out, lambda: self._dcs_browse(self.v_set_out, False))
+        row = tk.Frame(self.dcs_set, bg=C["bg1"])
+        row.pack(fill="x", pady=(6, 0))
+        tk.Label(row, text="NAME", bg=C["bg1"], fg=C["text3"], font=F["tiny"], width=8, anchor="w").pack(side="left")
+        self.lbl_set_suffix = tk.Label(row, text="", bg=C["bg1"], fg=C["text3"], font=F["small"])
+        self.lbl_set_suffix.pack(side="right")
+        Input(row, self.v_set_name, mono=True, placeholder="The set's name (filled in from the first map)").pack(
+            side="left", fill="x", expand=True, padx=(0, 8))
+        # whole folder
         self.dcs_paths = tk.Frame(f, bg=C["bg1"])
         self.dcs_paths.pack(fill="x")
         path_row(self.dcs_paths, "INPUT", self.v_dcs_src, lambda: self._dcs_browse(self.v_dcs_src, True))
@@ -5725,6 +5746,7 @@ class App(tk.Tk):
         tk.Frame(page, bg=C["bg1"], height=18).pack()
 
         watch(page, self.v_dcs_mode, self._dcs_mode_changed)
+        watch(page, self.v_dcs_source, self._dcs_mode_changed)
         self._dcs_mode_changed()
 
     def _helmet_row(self, parent, key, label, side):
@@ -5787,10 +5809,17 @@ class App(tk.Tk):
         mode = self.v_dcs_mode.get()
         self.v_dcs_help.set(self.DCS_HELP[mode])
         ac8 = mode.startswith("ac8")
-        if ac8:
-            self.dcs_extr_row.pack(fill="x", pady=(8, 0), before=self.dcs_paths)
+        one = self.v_dcs_source.get() == "set"
+        self.dcs_cfg["source"] = self.v_dcs_source.get()
+        for w in (self.dcs_extr_row, self.dcs_paths, self.dcs_set):
+            w.pack_forget()
+        if one:
+            self.dcs_set.pack(fill="x", after=self.dcs_source_row)
+            self._set_build_slots()
         else:
-            self.dcs_extr_row.pack_forget()
+            self.dcs_paths.pack(fill="x", after=self.dcs_source_row)
+            if ac8:
+                self.dcs_extr_row.pack(fill="x", pady=(8, 0), before=self.dcs_paths)
         for w in self.dcs_opts.winfo_children():
             w.pack_forget()
         show = {"ac8_pbr": (self.dd_dcs_preset, self.dd_dcs_pbrnormal), "ac8_dcs": (self.dd_dcs_fmt,),
@@ -5849,7 +5878,130 @@ class App(tk.Tk):
                 self.v_dcs_extr.set("")
                 self._dcs_default_out()
 
+    # ---- one set, its maps picked one by one
+    SET_SUFFIXES = {  # role -> name endings of that map (to find the rest of a set next to a picked map)
+        "ac8": {"base": ("_c", "_d", "_bc"), "normal": ("_n", "_no", "_nm"), "mr": ("_mro", "_mrx", "_mros", "_mr"),
+                "emissive": ("_ce", "_e")},
+    }
+
+    def _set_group(self):
+        mode = self.v_dcs_mode.get()
+        return "ac8" if mode.startswith("ac8") else mode
+
+    def _set_build_slots(self):
+        import ac8_dcs
+        group = self._set_group()
+        for w in self.dcs_set_slots.winfo_children():
+            w.destroy()
+        vars_ = self.set_vars.setdefault(group, {})
+        for role, label in ac8_dcs.SET_SLOTS[group]:
+            var = vars_.setdefault(role, tk.StringVar(value=""))
+            row = tk.Frame(self.dcs_set_slots, bg=C["bg1"])
+            row.pack(fill="x", pady=2)
+            tk.Label(row, text=label, bg=C["bg1"], fg=C["text2"], font=F["small"], width=24,
+                     anchor="w").pack(side="left")
+            x_ = tk.Label(row, text="✕", bg=C["bg1"], fg=C["text3"], font=F["small"], cursor="hand2", padx=6)
+            x_.pack(side="right")
+            x_.bind("<Button-1>", lambda e, v_=var: v_.set(""))
+            Button(row, "…", lambda r_=role, l_=label: self._set_pick(r_, l_), font=F["small"], padx=10,
+                   pady=2).pack(side="right", padx=(6, 0))
+            shown = tk.Label(row, text="—", bg=C["bg2"], fg=C["text3"], font=F["mono_s"], anchor="w", padx=8, pady=4)
+            shown.pack(side="left", fill="x", expand=True)
+
+            def refresh(v_=var, w_=shown):
+                p_ = v_.get()
+                w_.configure(text=Path(p_).name if p_ else "—", fg=C["text1"] if p_ else C["text3"])
+            watch(shown, var, refresh)
+            refresh()
+        mode = self.v_dcs_mode.get()
+        self.lbl_set_suffix.configure(text="+ _Roughmet / _Normal" if mode in ("ac8_dcs", "pbr_dcs")
+                                      else "+ _BaseColor / _Normal / …")
+
+    def _set_role_of(self, path, group):
+        """Which slot a file belongs in, from its name (None if the name doesn't say)."""
+        low = Path(path).stem.lower()
+        if group == "ac8":
+            for role, sufs in self.SET_SUFFIXES["ac8"].items():
+                if any(low.endswith(x) for x in sufs):
+                    return role, Path(path).stem[:low.rfind("_")]
+            return None, Path(path).stem
+        import ac8_dcs
+        name, role = ac8_dcs.split_name(Path(path).stem)
+        role = {"normal_gl": "normal", "normal_dx": "normal"}.get(role, role)
+        if group == "dcs_pbr" and role in (None, "base"):
+            role = "plain" if role is None else role
+        return role, name
+
+    def _set_pick(self, role, label):
+        group = self._set_group()
+        start = self.dcs_cfg.get(f"set_dir_{group}") or str(HERE)
+        f = filedialog.askopenfilename(title=label, initialdir=start,
+                                       filetypes=[("Images", "*.png *.tga *.dds *.tif *.tiff *.jpg *.jpeg"),
+                                                  ("All files", "*.*")])
+        if not f:
+            return
+        f = Path(f)
+        vars_ = self.set_vars[group]
+        vars_[role].set(str(f))
+        self.dcs_cfg[f"set_dir_{group}"] = str(f.parent)
+        _r, name = self._set_role_of(f, group)
+        # the rest of the set, if it's next to it (empty slots only)
+        try:
+            for p in sorted(f.parent.iterdir()):
+                if p == f or not p.is_file() or p.suffix.lower() not in (".png", ".tga", ".dds", ".tif", ".tiff",
+                                                                          ".jpg", ".jpeg"):
+                    continue
+                r2, n2 = self._set_role_of(p, group)
+                if r2 in vars_ and n2.lower() == name.lower() and not vars_[r2].get():
+                    vars_[r2].set(str(p))
+        except OSError:
+            pass
+        if not self.v_set_name.get().strip():
+            self.v_set_name.set(name)
+        if not self.v_set_out.get().strip():
+            mode = self.v_dcs_mode.get()
+            self.v_set_out.set(str(f.parent / ("DCS" if mode in ("ac8_dcs", "pbr_dcs") else "PBR")))
+
+    def _set_convert(self):
+        mode, group = self.v_dcs_mode.get(), self._set_group()
+        slots = {r: v.get() for r, v in self.set_vars.get(group, {}).items() if v.get()}
+        if not slots:
+            messagebox.showinfo(APP_NAME, "Pick at least one texture.")
+            return
+        first = Path(next(iter(slots.values())))
+        name = self.v_set_name.get().strip() or self._set_role_of(first, group)[1]
+        name = re.sub(r'[<>:"/\\|?*]', "_", name).strip(" .") or "Texture"
+        out = self.v_set_out.get().strip() or str(first.parent / ("DCS" if mode in ("ac8_dcs", "pbr_dcs") else "PBR"))
+        self.v_set_name.set(name)
+        self.v_set_out.set(out)
+        fmt, normal = self.v_dcs_fmt.get(), self.v_dcs_normal.get()
+        self.dcs_cfg.update(set_out=out, fmt=fmt, normal=normal, layout=self.v_dcs_orm.get())
+        cmd = [console_python(), "-u", DCS_SCRIPT, "set", "--mode", mode, "--out", out, "--name", name]
+        for r, p_ in slots.items():
+            cmd += ["--slot", f"{r}={p_}"]
+        if mode == "ac8_pbr":
+            cmd += ["--preset", self.v_pbr_preset.get(), "--format", "png"]
+            if self.v_pbr_normal.get() in ("opengl", "directx"):
+                cmd += ["--normal", self.v_pbr_normal.get()]
+        else:
+            cmd += ["--format", fmt, "--normal", normal]
+        if mode == "dcs_pbr" and self.v_dcs_orm.get() == "orm":
+            cmd += ["--orm"]
+        label = dict(self.DCS_MODES)[mode]
+
+        def work():
+            self.post("step", f"{label}: {name}…")
+            code, _o = self.run_cmd(cmd, HERE)
+            if code != 0:
+                raise RuntimeError(f"{label} failed (exit code {code}). See the log.")
+            self.post("call", lambda: open_folder(Path(out)))
+            return f"✔ {label}: {name} in {out}"
+
+        self._start(work, f"{label}…")
+
     def dcs_convert(self):
+        if self.v_dcs_source.get() == "set":
+            return self._set_convert()
         mode = self.v_dcs_mode.get()
         src, out = self.v_dcs_src.get().strip(), self.v_dcs_out.get().strip()
         if not src or not Path(src).is_dir():
