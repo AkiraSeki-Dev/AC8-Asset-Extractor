@@ -76,11 +76,11 @@ def build_info(code_dir):
 
 
 def latest_test():
-    """{'version': 'Dev-<commit>', 'build': N, 'url': zip download, 'notes': what changed} of the current test build."""
+    """{'version': '-<commit>' (shown as v-<commit>), 'build': N, 'url': zip download, 'notes': what changed} of the current test build."""
     base = f"https://github.com/{REPO}/releases/download/{TEST_TAG}"
     info = json.loads(_get(f"{base}/build.json").decode("utf-8"))
     build = int(info["build"])
-    return {"version": f"Dev-{info.get('commit') or build}", "build": build, "url": f"{base}/{info['zip']}",
+    return {"version": f"-{info.get('commit') or build}", "build": build, "url": f"{base}/{info['zip']}",
             "notes": str(info.get("notes") or "")}
 
 

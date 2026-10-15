@@ -62,7 +62,7 @@ try:  # which update channel this copy is on: live releases, or the test builds 
 except Exception:
     BUILD = {"channel": "live", "build": 0}
 IS_TEST = BUILD.get("channel") == "test"
-VERSION_LABEL = f"Dev-{BUILD.get('commit') or BUILD['build']}" if IS_TEST else APP_VERSION   # shown as v<label>
+VERSION_LABEL = f"-{BUILD.get('commit') or BUILD['build']}" if IS_TEST else APP_VERSION   # shown as v<label>
 
 RAW_DIR_NAME = "1_Raw_UAssets"
 FINAL_DIR_NAME = "2_Final_Export"
@@ -2724,7 +2724,7 @@ class App(tk.Tk):
             def ask():
                 notes = info["notes"].strip()
                 box["ok"] = messagebox.askyesno(
-                    APP_NAME, f"{'Test build' if IS_TEST else 'Version'} {info['version']} is available (you have {VERSION_LABEL}).\n\n"
+                    APP_NAME, f"{'Test build' if IS_TEST else 'Version'} v{info['version']} is available (you have v{VERSION_LABEL}).\n\n"
                               + (notes[:900] + ("…" if len(notes) > 900 else "") + "\n\n" if notes else "")
                               + "Update now? Your settings, exports and asset list are kept. The app restarts "
                                 "afterwards.")
@@ -2733,8 +2733,8 @@ class App(tk.Tk):
             self.post("call", ask)
             ev.wait()
             if not box.get("ok"):
-                return f"Update to {info['version']} skipped"
-            self.post("step", f"Updating to {info['version']}…")
+                return f"Update to v{info['version']} skipped"
+            self.post("step", f"Updating to v{info['version']}…")
             ac8_update.install(HERE, info["url"], log=lambda t: self.post("log", t), version=info["version"])
             self.post("call", lambda: self.after(800, self._restart))
             return f"✔ Updated to v{info['version']} — restarting…"
