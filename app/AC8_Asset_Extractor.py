@@ -5747,6 +5747,7 @@ class App(tk.Tk):
 
         watch(page, self.v_dcs_mode, self._dcs_mode_changed)
         watch(page, self.v_dcs_source, self._dcs_mode_changed)
+        watch(page, self.v_set_name, self._set_headers_update)
         self._dcs_mode_changed()
 
     def _helmet_row(self, parent, key, label, side):
@@ -5884,6 +5885,25 @@ class App(tk.Tk):
                 "emissive": ("_ce", "_e")},
     }
 
+    # the slots grouped by the file they end up in (header, roles), per mode
+    SET_GROUPS = {
+        "ac8_dcs": [("→ <name>   colour + alpha", ["base"]),
+                    ("→ <name>_Roughmet   R AO · G roughness · B metallic", ["mr"]),
+                    ("→ <name>_Normal", ["normal"]),
+                    ("→ <name>_Emissive   extra", ["emissive"])],
+        "ac8_pbr": [("→ BaseColor", ["base"]),
+                    ("→ Metallic · Roughness · AO", ["mr"]),
+                    ("→ Normal   (AO too, from a _NO map)", ["normal"]),
+                    ("→ Emissive", ["emissive"])],
+        "pbr_dcs": [("→ <name>   colour + alpha", ["base", "opacity"]),
+                    ("→ <name>_Roughmet   R AO · G roughness · B metallic", ["ao", "roughness", "metallic"]),
+                    ("→ <name>_Normal", ["normal"]),
+                    ("→ <name>_Emissive   extra", ["emissive"])],
+        "dcs_pbr": [("→ BaseColor (+ Opacity from its alpha)", ["plain"]),
+                    ("→ Metallic · Roughness · AO", ["roughmet"]),
+                    ("→ Normal", ["normal"])],
+    }
+
     def _set_group(self):
         mode = self.v_dcs_mode.get()
         return "ac8" if mode.startswith("ac8") else mode
@@ -5894,7 +5914,19 @@ class App(tk.Tk):
         for w in self.dcs_set_slots.winfo_children():
             w.destroy()
         vars_ = self.set_vars.setdefault(group, {})
-        for role, label in ac8_dcs.SET_SLOTS[group]:
+        labels = dict(ac8_dcs.SET_SLOTS[group])
+        rows = []
+        for gi, (header, roles) in enumerate(self.SET_GROUPS[self.v_dcs_mode.get()]):
+            rows.append((header, gi))
+            rows += [(r, None) for r in roles]
+        self._set_headers = []
+        for role, gi in rows:
+            if gi is not None:  # a header: which output file these maps go into
+                h_ = tk.Label(self.dcs_set_slots, text=role, bg=C["bg1"], fg=C["accent"], font=F["tiny"], anchor="w")
+                h_.pack(fill="x", pady=(10 if gi else 2, 1))
+                self._set_headers.append((h_, role))
+                continue
+            label = labels[role]
             var = vars_.setdefault(role, tk.StringVar(value=""))
             row = tk.Frame(self.dcs_set_slots, bg=C["bg1"])
             row.pack(fill="x", pady=2)
@@ -5913,9 +5945,18 @@ class App(tk.Tk):
                 w_.configure(text=Path(p_).name if p_ else "—", fg=C["text1"] if p_ else C["text3"])
             watch(shown, var, refresh)
             refresh()
+        self._set_headers_update()
         mode = self.v_dcs_mode.get()
         self.lbl_set_suffix.configure(text="+ _Roughmet / _Normal" if mode in ("ac8_dcs", "pbr_dcs")
                                       else "+ _BaseColor / _Normal / …")
+
+    def _set_headers_update(self):
+        name = self.v_set_name.get().strip() or "<name>"
+        for h_, template in getattr(self, "_set_headers", []):
+            try:
+                h_.configure(text=template.replace("<name>", name))
+            except tk.TclError:
+                pass
 
     def _set_role_of(self, path, group):
         """Which slot a file belongs in, from its name (None if the name doesn't say)."""
