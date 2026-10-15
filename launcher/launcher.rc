@@ -3,8 +3,8 @@ APPICON ICON "app.ico"
 1 24 "app.manifest"
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,3,7,0
- PRODUCTVERSION 1,3,7,0
+ FILEVERSION 1,3,8,0
+ PRODUCTVERSION 1,3,8,0
  FILEOS 0x40004
  FILETYPE 0x1
 BEGIN
@@ -14,8 +14,8 @@ BEGIN
     BEGIN
       VALUE "FileDescription", "Ace Combat 8 Asset Extractor"
       VALUE "ProductName", "Ace Combat 8 Asset Extractor"
-      VALUE "FileVersion", "1.3.7.0"
-      VALUE "ProductVersion", "1.3.7.0"
+      VALUE "FileVersion", "1.3.8.0"
+      VALUE "ProductVersion", "1.3.8.0"
       VALUE "OriginalFilename", "AC8 Asset Extractor.exe"
       VALUE "InternalName", "AC8 Asset Extractor"
     END

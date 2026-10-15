@@ -149,6 +149,15 @@ AC8 Asset Extractor\
 
 ## Version history
 
+v1.3.8: the DCS page's texture converter and helmet converter, reworked.
+- **Texture converter › One set:** pick each map into its own slot (the rest of the set next to it is filled in)
+  and give it a **Name**; the suffixes are added. **Whole folder** works as before. ORM is gone from the page.
+- **F/A-18 helmet converter:** the design curves smoothly out to the DCS helmet's edge with no squeezed bands,
+  streaks or shifts along the edge; the front name stays clear of the brow pad. AC8's strap slots are left as they
+  are (touch them up in your editor). New **Name** field for the output files.
+- **Test builds** (the "Test build" pre-release) show **v-** plus their commit in the top left and update
+  themselves to newer test builds.
+
 v1.3.7: smoother edges from the F/A-18 helmet converter: the design is stretched out to the DCS helmet's edge with
 one smooth stretch instead of row by row, so busy designs (and UV checkers) no longer get stepped, wavy or bent
 cells along the edges.
