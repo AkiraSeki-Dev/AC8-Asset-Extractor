@@ -269,7 +269,7 @@ SET_SLOTS = {
     "ac8": [("base", "Colour  (_C)"), ("normal", "Normal  (_N / _NO)"), ("mr", "Metal / rough  (_MRO / _MRX)"),
             ("emissive", "Emissive  (_CE / _E)")],
     "pbr_dcs": [("base", "Base colour"), ("opacity", "Opacity"), ("metallic", "Metallic"), ("roughness", "Roughness"),
-                ("ao", "Ambient occlusion"), ("orm", "ORM  (packed AO/R/M)"), ("normal", "Normal"),
+                ("ao", "Ambient occlusion"), ("normal", "Normal"),
                 ("emissive", "Emissive")],
     "dcs_pbr": [("plain", "Diffuse"), ("roughmet", "Roughmet"), ("normal", "Normal  (_Normal / _nm)")],
 }

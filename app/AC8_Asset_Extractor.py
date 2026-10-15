@@ -5603,10 +5603,10 @@ class App(tk.Tk):
                    "Unity or glTF. Packed maps are split: _MRO → Metallic / Roughness / AO, _NO → Normal + AO.",
         "ac8_dcs": "Ace Combat 8 textures → DCS World sets: <name> (colour + alpha), <name>_Roughmet (R AO · G "
                    "roughness · B metallic) and <name>_Normal (DirectX).",
-        "pbr_dcs": "PBR maps (BaseColor, Metallic, Roughness, AO or ORM, Normal, Opacity, Emissive) → DCS World sets. "
+        "pbr_dcs": "PBR maps (BaseColor, Metallic, Roughness, AO, Normal, Opacity, Emissive) → DCS World sets. "
                    "_Normal_OpenGL / _Normal_DirectX in a name wins over the setting. Subfolders are kept.",
         "dcs_pbr": "DCS World sets (<name>, <name>_Roughmet, <name>_Normal) → BaseColor (+ Opacity), Metallic, "
-                   "Roughness, AO (or one ORM map) and a normal map in the convention you pick.",
+                   "Roughness, AO and a normal map in the convention you pick.",
     }
     HELMET_SLOTS = [  # key, label, side, the endings its set-mates have
         ("ac8_color", "Colour  (_C)", "ac8", ("_c",)),
@@ -5629,7 +5629,7 @@ class App(tk.Tk):
         self.v_dcs_extr = tk.StringVar(value="")
         self.v_dcs_fmt = tk.StringVar(value=cfg.get("fmt", "dds"))
         self.v_dcs_normal = tk.StringVar(value=cfg.get("normal", "opengl"))
-        self.v_dcs_orm = tk.StringVar(value=cfg.get("layout", "separate"))
+        self.v_dcs_orm = tk.StringVar(value="separate")  # (ORM output: not used for DCS work)
         self.v_dcs_help = tk.StringVar()
 
         def section(title, note=""):
@@ -5824,7 +5824,7 @@ class App(tk.Tk):
             w.pack_forget()
         show = {"ac8_pbr": (self.dd_dcs_preset, self.dd_dcs_pbrnormal), "ac8_dcs": (self.dd_dcs_fmt,),
                 "pbr_dcs": (self.dd_dcs_normal, self.dd_dcs_fmt),
-                "dcs_pbr": (self.dd_dcs_layout, self.dd_dcs_normal, self.dd_dcs_fmt)}[mode]
+                "dcs_pbr": (self.dd_dcs_normal, self.dd_dcs_fmt)}[mode]
         for w in show:
             w.pack(side="left", padx=(0, 6))
         self.dd_dcs_normal.cap.configure(text="YOUR NORMALS" if mode == "pbr_dcs" else "NORMAL OUT")
@@ -5985,8 +5985,6 @@ class App(tk.Tk):
                 cmd += ["--normal", self.v_pbr_normal.get()]
         else:
             cmd += ["--format", fmt, "--normal", normal]
-        if mode == "dcs_pbr" and self.v_dcs_orm.get() == "orm":
-            cmd += ["--orm"]
         label = dict(self.DCS_MODES)[mode]
 
         def work():
