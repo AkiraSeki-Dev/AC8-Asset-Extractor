@@ -29,10 +29,11 @@ from PIL import Image
 
 HERE = Path(__file__).resolve().parent
 HELMET_DATA = HERE / "assets" / "helmet_f18.npz"
-# the DCS helmets the AC8 pilot helmet can go onto: key -> (name, the two shells lined up, default file name)
+# the DCS helmets the AC8 pilot helmet can go onto: key -> (name, the two shells lined up, default file name,
+# where the design is also fitted rim to rim at the back: see HelmetMap's back)
 AIRCRAFT = {
-    "f18": ("F/A-18", HERE / "assets" / "helmet_f18.npz", "pilot_F18_helmet"),
-    "f14": ("F-14", HERE / "assets" / "helmet_f14.npz", "pilot_F14_helmet"),
+    "f18": ("F/A-18", HERE / "assets" / "helmet_f18.npz", "pilot_F18_helmet", None),
+    "f14": ("F-14", HERE / "assets" / "helmet_f14.npz", "pilot_F14_helmet", (45, 85)),  # its back edge is higher
 }
 IMAGE_EXTS = {".png", ".tga", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".dds"}
 
@@ -481,7 +482,9 @@ class HelmetMap:
     SPREAD = 2    # how locally the pull follows the nearest bit of rim (higher: more local)
     FADE = (0.2, 0.7)  # the pull is full this far in from the rim, then fades out over this much (radians)
 
-    def __init__(self, size=4096, data=HELMET_DATA, raise_=RAISE, log=print):
+    def __init__(self, size=4096, data=HELMET_DATA, raise_=RAISE, log=print, back=None):
+        # back: (full, gone) degrees from the back where the AC8 rim is also laid onto the DCS rim (helmets whose
+        # shell ends higher at the back than AC8's, so the design there is lifted instead of cut off)
         m = np.load(data)
         self.size = W = H = size
         Vd, Td = m["dcs_v"].astype(np.float64), m["dcs_uv"].astype(np.float64)
@@ -687,7 +690,13 @@ class HelmetMap:
         pw = len(kk_) // 2
         disp_side = np.stack([np.convolve(np.r_[disp_side[-pw:, c], disp_side[:, c], disp_side[:pw, c]], kk_,
                                           mode="valid") for c in (0, 1)], 1)
-        wf_ = front_weight(np.arctan2(bd[:, 1], bd[:, 0]))[:, None]
+        ph_bd = np.arctan2(bd[:, 1], bd[:, 0])
+        wf_ = front_weight(ph_bd)
+        if back:
+            ab = 180 - np.degrees(np.abs(ph_bd))   # degrees from the back
+            tb = np.clip((back[1] - ab) / (back[1] - back[0]), 0, 1)
+            wf_ = np.maximum(wf_, tb * tb * (3 - 2 * tb))
+        wf_ = wf_[:, None]
         disp = wf_ * disp_front + (1 - wf_) * disp_side * self.SIDE_WARP
         G = 384
         gx_, gy_ = np.meshgrid(np.linspace(-lim, lim, G), np.linspace(-lim, lim, G))
@@ -996,9 +1005,9 @@ def helmet(out, ac8_color=None, ac8_normal=None, ac8_mro=None, dcs_color=None, d
     name = re.sub(r"\.(png|tga|dds|tif|tiff)$", "", name, flags=re.I)
     name = re.sub(r"_(roughmet|normal|nm)$", "", name, flags=re.I)
     size = next((max(Image.open(p).size) for p in (dcs_color, dcs_normal, dcs_roughmet) if p), 4096)
-    label, data, default_stem = AIRCRAFT[aircraft]
+    label, data, default_stem, back = AIRCRAFT[aircraft]
     log(f"Helmet: AC8 → DCS {label} helmet")
-    hm = HelmetMap(size, data=data, raise_=raise_, log=log)
+    hm = HelmetMap(size, data=data, raise_=raise_, log=log, back=back)
     written = []
     for src, base, suffix, fn, kind in ((ac8_color, dcs_color, "", hm.color, "color"),
                                         (ac8_mro, dcs_roughmet, "_Roughmet", hm.roughmet, "roughmet"),
