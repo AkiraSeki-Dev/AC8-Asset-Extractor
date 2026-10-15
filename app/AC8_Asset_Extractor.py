@@ -62,7 +62,7 @@ try:  # which update channel this copy is on: live releases, or the test builds 
 except Exception:
     BUILD = {"channel": "live", "build": 0}
 IS_TEST = BUILD.get("channel") == "test"
-VERSION_LABEL = f"Test-{BUILD['build']}" if IS_TEST else APP_VERSION   # shown as v<label>
+VERSION_LABEL = f"Dev-{BUILD.get('commit') or BUILD['build']}" if IS_TEST else APP_VERSION   # shown as v<label>
 
 RAW_DIR_NAME = "1_Raw_UAssets"
 FINAL_DIR_NAME = "2_Final_Export"
@@ -1091,7 +1091,7 @@ class App(tk.Tk):
         self.after(400, lambda: self._clear_scratch(previews=not self.v_keep_previews.get()))
         self.v_search.trace_add("write", lambda *_: self._search_soon())
         self._log(f"{APP_NAME} v{VERSION_LABEL}"
-                  + (f"  (test build of {APP_VERSION}, commit {BUILD.get('commit', '?')})" if IS_TEST else ""))
+                  + (f"  (test build {BUILD['build']} of {APP_VERSION})" if IS_TEST else ""))
         if self._removed_files:
             self._log("  Tidied up files older versions left behind: " + ", ".join(self._removed_files))
         if not UNPACKER_DIR:

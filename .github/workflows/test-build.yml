@@ -1,6 +1,6 @@
 # A build to try out before releasing: push to the test-build branch (or run it from the Actions tab). The files
 # (Setup.exe + portable zip, same as a release) appear on the Releases page as the "Test build" pre-release,
-# replacing the previous one. Each test build is numbered (Test-<run number>, shown as vTest-N in the app) and
+# replacing the previous one. Each test build is named by its commit (shown as vDev-<commit> in the app; the run number orders them) and
 # carries build.json; copies installed from a test build update only to newer test builds (live copies never
 # see them, since pre-releases are never "latest").
 name: Test build
@@ -24,7 +24,7 @@ jobs:
         run: |
           v=$(python3 -c "import re; print(re.search(r'APP_VERSION = \"([^\"]+)\"', open('app/AC8_Asset_Extractor.py', encoding='utf-8').read()).group(1))")
           short=$(git rev-parse --short HEAD)
-          echo "tag=vTest-${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          echo "tag=vDev-$short" >> "$GITHUB_OUTPUT"
           echo "build=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
           echo "short=$short" >> "$GITHUB_OUTPUT"
           echo "app=$v" >> "$GITHUB_OUTPUT"
@@ -130,4 +130,4 @@ jobs:
           printf '%s (commit %s), for trying out before a release. Copies installed from a test build update to newer test builds by themselves; live copies never see them.\n\nDownload **%s** (installer) or the zip (portable).\n' \
             "${TAG#v}" "${GITHUB_SHA::7}" "AC8_Asset_Extractor_${TAG}_Setup.exe" > notes.md
           gh release create test-latest "AC8_Asset_Extractor_${TAG}_Setup.exe" "AC8_Asset_Extractor_${TAG}.zip" build.json \
-            --prerelease --latest=false --title "Test build ${TAG#v} (${GITHUB_SHA::7})" --notes-file notes.md --target "$GITHUB_SHA"
+            --prerelease --latest=false --title "Test build (${GITHUB_SHA::7})" --notes-file notes.md --target "$GITHUB_SHA"
