@@ -94,7 +94,8 @@ The **DCS** tab has the tools for DCS World mods:
 - **Texture converter**, four ways:
   - **AC8 → PBR:** an extraction's textures → standard PBR maps (Blender / Substance, Unreal, Unity, glTF).
   - **AC8 → DCS:** an extraction's textures → DCS sets: `<name>` (colour + alpha), `<name>_Roughmet` (R AO · G
-    roughness · B metallic), `<name>_Normal` (DirectX).
+    roughness · B metallic · A AO again, like DCS's own files), `<name>_Normal` (DirectX). DDS files are DXT5 with
+    mipmaps for Roughmet and normals, like the game's.
   - **PBR → DCS:** any PBR maps (BaseColor, Metallic, Roughness, AO, Normal, Opacity) → DCS sets.
   - **DCS → PBR:** DCS sets → BaseColor (+ Opacity), Metallic, Roughness, AO and a normal map.
 

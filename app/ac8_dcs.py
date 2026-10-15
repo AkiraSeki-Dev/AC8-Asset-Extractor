@@ -2,7 +2,7 @@
 
 DCS texture set (the "PBR to DCS" Substance Painter preset):
     <name>            base colour (+ opacity in alpha)
-    <name>_Roughmet   R ambient occlusion, G roughness, B metallic
+    <name>_Roughmet   R ambient occlusion, G roughness, B metallic, A ambient occlusion again (as DCS's own)
     <name>_Normal     normal map, DirectX (green down)
 
     python ac8_dcs.py to-dcs  <in folder> <out folder> [--format png|tga|dds] [--normal opengl|directx]
@@ -116,12 +116,13 @@ def save_dds(im, path, fmt):
 
 
 def save_img(im, path, fmt, kind="color"):
-    """Save a PIL image as png / tga / dds. kind ('color' / 'data' / 'normal') picks the DDS compression:
-    DXT5 for colour with alpha and for normals, DXT1 otherwise."""
+    """Save a PIL image as png / tga / dds. kind ('color' / 'data' / 'normal' / 'roughmet') picks the DDS
+    compression: DXT5 for colour with alpha, normals and Roughmet (its alpha holds AO, like DCS's own), DXT1
+    otherwise. DDS files get a full mip chain, like the game's."""
     path = Path(path).with_suffix("." + fmt)
     path.parent.mkdir(parents=True, exist_ok=True)
     if fmt == "dds":
-        if kind == "normal":
+        if kind in ("normal", "roughmet"):
             save_dds(im.convert("RGBA"), path, "DXT5")
         elif im.mode == "RGBA" and im.getextrema()[3][0] < 255:
             save_dds(im, path, "DXT5")
@@ -175,7 +176,7 @@ def to_dcs(name, maps, out, fmt="png", normal_in="opengl", log=print):
                 else (ao, rough, ch)
             got.append(role)
     if got:
-        written.append(save(np.stack([ao, rough, metal], -1), out / f"{name}_Roughmet", fmt, "data"))
+        written.append(save(np.stack([ao, rough, metal, ao], -1), out / f"{name}_Roughmet", fmt, "roughmet"))
         missing = [r for r in ("ao", "roughness", "metallic") if r not in got]
         if missing:
             log(f"  {name}: no {', '.join(missing)} map; used " +
@@ -204,6 +205,8 @@ def to_pbr(name, maps, out, fmt="png", normal_out="opengl", orm=False, log=print
             written.append(save(base[..., 3], out / f"{name}_Opacity", fmt, "data"))
     if "roughmet" in maps:
         rm = load(maps["roughmet"], size)
+        if rm[..., 3].min() < 0.999:  # DCS keeps AO in the alpha too, at full precision (DXT5 alpha): use that
+            rm[..., 0] = rm[..., 3]
         if orm:
             written.append(save(rm[..., :3], out / f"{name}_ORM", fmt, "data"))
         else:
@@ -283,7 +286,8 @@ def _to_fmt(paths, fmt):
     for p in paths:
         p = Path(p)
         _n, role = split_name(p.stem)
-        kind = "normal" if role and role.startswith("normal") else "data" if role in ("roughmet", "orm") else "color"
+        kind = "normal" if role and role.startswith("normal") else role if role == "roughmet" else \
+            "data" if role == "orm" else "color"
         im = Image.open(p)
         im.load()
         new.append(save_img(im.convert("RGBA") if "A" in im.getbands() else im.convert("RGB"), p, fmt, kind))
@@ -332,7 +336,8 @@ def reformat(folder, fmt, log=print):
     n = 0
     for p in sorted(Path(folder).rglob("*.png")):
         _name, role = split_name(p.stem)
-        kind = "normal" if role and role.startswith("normal") else "data" if role in ("roughmet", "orm") else "color"
+        kind = "normal" if role and role.startswith("normal") else role if role == "roughmet" else \
+            "data" if role == "orm" else "color"
         im = Image.open(p)
         im.load()
         save_img(im.convert("RGBA") if "A" in im.getbands() else im.convert("RGB"), p, fmt, kind)
@@ -951,9 +956,9 @@ class HelmetMap:
         return self._paint(self._base(dcs_color, 4), col)
 
     def roughmet(self, ac8_mro, dcs_roughmet=None):
-        """AC8 _MRO (R metallic, G roughness, B AO) -> DCS Roughmet (R AO, G roughness, B metallic)."""
+        """AC8 _MRO (R metallic, G roughness, B AO) -> DCS Roughmet (R AO, G roughness, B metallic, A AO)."""
         mro = self._sample(ac8_mro)
-        return self._paint(self._base(dcs_roughmet, 3), mro[:, [2, 1, 0]])
+        return self._paint(self._base(dcs_roughmet, 4), mro[:, [2, 1, 0, 2]])
 
     def normal(self, ac8_normal, dcs_normal=None):
         """AC8 normal map (DirectX) -> the DCS shell's directions (DirectX)."""
@@ -989,7 +994,7 @@ def helmet(out, ac8_color=None, ac8_normal=None, ac8_mro=None, dcs_color=None, d
     hm = HelmetMap(size, raise_=raise_, log=log)
     written = []
     for src, base, suffix, fn, kind in ((ac8_color, dcs_color, "", hm.color, "color"),
-                                        (ac8_mro, dcs_roughmet, "_Roughmet", hm.roughmet, "data"),
+                                        (ac8_mro, dcs_roughmet, "_Roughmet", hm.roughmet, "roughmet"),
                                         (ac8_normal, dcs_normal, "_Normal", hm.normal, "normal")):
         if not src:
             continue

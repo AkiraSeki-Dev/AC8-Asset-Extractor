@@ -10,7 +10,7 @@ How AC8 packs its channels (checked on the F-14D):
     _MROS like _MRO (weapons, launchers)
 
 DCS World follows the "PBR to DCS" Substance Painter export preset: <set>.png (base colour + alpha),
-<set>_Roughmet.png (R ambient occlusion, G roughness, B metallic) and <set>_Normal.png (DirectX).
+<set>_Roughmet.png (R ambient occlusion, G roughness, B metallic, A ambient occlusion again) and <set>_Normal.png (DirectX).
 
     python ac8_pbr.py <textures folder> <output folder> [--preset separate|unreal|unity_hdrp|unity_urp|gltf|dcs]
                       [--normal opengl|directx]
@@ -154,7 +154,7 @@ def write_set(maps, out_dir, name, preset, normal_conv=None, tile=None):
             return out_dir / (f"{name}{suffix}.{tile}.png" if tile else f"{name}{suffix}.png")
         if "base" in maps:
             written.append(_save(maps["base"], q(""), "RGBA"))
-        written.append(_save(np.stack([ao, r, m], -1), q("_Roughmet"), "RGB"))
+        written.append(_save(np.stack([ao, r, m, ao], -1), q("_Roughmet"), "RGBA"))  # DCS: AO in alpha too
         if "normal_dx" in maps:
             written.append(_save(normal_image(maps["normal_dx"], conv), q("_Normal"), "RGB"))
         if "emissive" in maps:
