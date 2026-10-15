@@ -5792,7 +5792,7 @@ class App(tk.Tk):
         tk.Label(row, text="NAME", bg=C["bg1"], fg=C["text3"], font=F["tiny"], width=8, anchor="w").pack(side="left")
         self.lbl_set_suffix = tk.Label(row, text="", bg=C["bg1"], fg=C["text3"], font=F["small"])
         self.lbl_set_suffix.pack(side="right")
-        Input(row, self.v_set_name, mono=True, placeholder="The set's name (filled in from the first map)").pack(
+        Input(row, self.v_set_name, mono=True, placeholder="The set's name (follows the latest map put in)").pack(
             side="left", fill="x", expand=True, padx=(0, 8))
         # whole folder
         self.dcs_paths = tk.Frame(f, bg=C["bg1"])
@@ -6129,8 +6129,7 @@ class App(tk.Tk):
                     vars_[r2].set(str(p))
         except OSError:
             pass
-        if not self.v_set_name.get().strip():
-            self.v_set_name.set(name)
+        self.v_set_name.set(name)  # the name follows the latest map put in (whatever its slot); edit it after
         if not self.v_set_out.get().strip():
             mode = self.v_dcs_mode.get()
             self.v_set_out.set(str(f.parent / ("DCS" if mode in ("ac8_dcs", "pbr_dcs") else "PBR")))
