@@ -154,6 +154,14 @@ resize, ✕ to close) and the **Extractions** list. The app opens on the **Catal
 
 ## Version history
 
+v1.3.11:
+- **Pilot helmet converter:** new **Aircraft** choice: the DCS **F-14** (HGU-55/P) helmet as well as the F/A-18C.
+  The design is fitted to the F-14's higher back edge, so rear names aren't cut off.
+- **Roughmet** files now carry AO in the alpha too and are always DXT5 (like DCS's own); reading one uses it.
+- **Windows** menu (top right): show or hide the **Logs** (now a resizable pane with the status line on top)
+  and the **Extractions** list. The app opens on the **Catalog**.
+- Smoother UI: dividers resize when you let go, and long logs no longer slow the window down.
+
 v1.3.10: drag and drop on the DCS page.
 - Drag images from Explorer onto the texture slots (One set and the helmet converter), and folders onto the
   input / output bars.
