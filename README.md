@@ -147,6 +147,11 @@ AC8 Asset Extractor\
 
 ## Version history
 
+v1.3.9:
+- Settings → APP → **Update to**: pick whether the updater follows **Release** or **Test build**.
+- DCS page › One set: the slots are grouped under the file they go into (e.g. **→ Wing_Roughmet** R AO · G
+  roughness · B metallic), so you can see which map makes what.
+
 v1.3.8: the DCS page's texture converter and helmet converter, reworked.
 - **Texture converter › One set:** pick each map into its own slot (the rest of the set next to it is filled in)
   and give it a **Name**; the suffixes are added. **Whole folder** works as before. ORM is gone from the page.
