@@ -793,6 +793,25 @@ def _no_window():
     return {"creationflags": 0x08000000} if os.name == "nt" else {}
 
 
+def debounced(widget, fn, ms=60):
+    """An event handler that runs fn once the events stop for ms (resizing fires <Configure> for every pixel)."""
+    state = {"job": None, "e": None}
+
+    def fire():
+        state["job"] = None
+        try:
+            fn(state["e"])
+        except tk.TclError:
+            pass
+
+    def handler(e):
+        state["e"] = e
+        if state["job"] is not None:
+            widget.after_cancel(state["job"])
+        state["job"] = widget.after(ms, fire)
+    return handler
+
+
 def watch(widget, variable, fn):
     """variable.trace_add for a widget, removed again when the widget is destroyed — otherwise closing a window
     (Settings, Export textures) leaves traces on shared settings that call into widgets that no longer exist."""
@@ -1039,12 +1058,15 @@ class Progress(tk.Canvas):
     def _tick(self):
         if not self.running:
             return
+        if not self.winfo_ismapped():  # hidden (log pane closed): just check back now and then
+            self.after(250, self._tick)
+            return
         w = max(self.winfo_width(), 100)
         seg = w // 4
         self.pos = (self.pos + max(6, w // 120)) % (w + seg)
         self.delete("all")
         self.create_rectangle(self.pos - seg, 0, self.pos, 3, fill=C["accent"], width=0)
-        self.after(16, self._tick)
+        self.after(33, self._tick)
 
 
 def box_image(kind, size):
@@ -1336,11 +1358,11 @@ class App(tk.Tk):
 
         # pages above, the log below them (drag the divider; Windows menu or ✕ hides it)
         self.vsplit = tk.PanedWindow(self, orient="vertical", bg=C["bg0"], sashwidth=8, bd=0,
-                                     sashrelief="flat", showhandle=False, sashcursor="sb_v_double_arrow")
+                                     sashrelief="flat", opaqueresize=False, showhandle=False, sashcursor="sb_v_double_arrow")
         self.vsplit.pack(fill="both", expand=True, padx=18, pady=(10, 6))
         # body: (assets | catalog | textures) | extractions
         self.body = tk.PanedWindow(self.vsplit, orient="horizontal", bg=C["bg0"], sashwidth=10, bd=0,
-                                   sashrelief="flat", showhandle=False)
+                                   sashrelief="flat", opaqueresize=False, showhandle=False)
         self.vsplit.add(self.body, stretch="always", minsize=round(260 * SCALE))
         self._build_browser()
         self._build_catalog()
@@ -1448,7 +1470,8 @@ class App(tk.Tk):
         self.cards = tk.Frame(self.canvas, bg=C["bg1"])
         self.cards_win = self.canvas.create_window(0, 0, window=self.cards, anchor="nw")
         self.cards.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
-        self.canvas.bind("<Configure>", lambda e: self.canvas.itemconfigure(self.cards_win, width=e.width))
+        self.canvas.bind("<Configure>", debounced(self.canvas, lambda e: self.canvas.itemconfigure(
+            self.cards_win, width=e.width)))
         # A divider (PanedWindow sash) shows the resize cursor by setting it on the whole divider widget while the
         # mouse is over the sash, and puts it back when the mouse leaves. On Windows Tk only re-reads the cursor of
         # the window the mouse is in when that window's own cursor changes, so after the divider has put its cursor
@@ -2161,7 +2184,19 @@ class App(tk.Tk):
 
     # ---------------------------------------------------------- log / pump
 
-    def _log(self, text, tag=None):
+    LOG_KEEP = 3000   # lines kept in the log box (the session log file has everything)
+
+    def _log_tidy(self):
+        """Scroll to the end and drop the oldest lines once the box gets long (a huge Text widget slows the UI)."""
+        lines = int(self.log.index("end-1c").split(".")[0])
+        if lines > self.LOG_KEEP + 500:
+            state = self.log.cget("state")
+            self.log.configure(state="normal")
+            self.log.delete("1.0", f"{lines - self.LOG_KEEP}.0")
+            self.log.configure(state=state)
+        self.log.see("end")
+
+    def _log(self, text, tag=None, batch=False):
         if tag is None:
             low = text.lower()
             if text.startswith("✔"):
@@ -2174,7 +2209,8 @@ class App(tk.Tk):
                 tag = "warn"
         self.log.configure(state="normal")
         self.log.insert("end", text + "\n", tag or ())
-        self.log.see("end")
+        if not batch:
+            self._log_tidy()
         self.log.configure(state="disabled")
         SLOG.write(text)
         if self.run_log:
@@ -2187,11 +2223,13 @@ class App(tk.Tk):
         self.msgs.put((kind, value))
 
     def _pump(self):
+        logged = 0
         try:
-            while True:
+            for _ in range(400):  # at most this many per tick, so a flood of output can't freeze the window
                 kind, value = self.msgs.get_nowait()
                 if kind == "log":
-                    self._log(value)
+                    self._log(value, batch=True)
+                    logged += 1
                 elif kind == "status":
                     self.v_status.set(value[-110:])
                 elif kind == "step":
@@ -2202,7 +2240,9 @@ class App(tk.Tk):
                     value()
         except queue.Empty:
             pass
-        self.after(80, self._pump)
+        if logged:
+            self._log_tidy()
+        self.after(15 if not self.msgs.empty() else 80, self._pump)
 
     # ---------------------------------------------------------- running things
 
@@ -3057,7 +3097,7 @@ class App(tk.Tk):
             canvas.configure(scrollregion=(0, 0, canvas.winfo_width(),
                                            max(inner.winfo_reqheight(), canvas.winfo_height())))
         inner.bind("<Configure>", region)
-        canvas.bind("<Configure>", lambda e: (canvas.itemconfigure(win, width=e.width), region()))
+        canvas.bind("<Configure>", debounced(canvas, lambda e: (canvas.itemconfigure(win, width=e.width), region())))
         self.scroll_canvases.append(canvas)
         return canvas, inner
 
@@ -3067,7 +3107,7 @@ class App(tk.Tk):
         frame, box = self._panel("CATALOG", self.v_cat_count)
         self.pane_catalog = frame
         # draggable divider between the list and the page (long character names need the room)
-        split = tk.PanedWindow(box, orient="horizontal", bg=C["border2"], sashwidth=6, bd=0, sashrelief="flat",
+        split = tk.PanedWindow(box, orient="horizontal", bg=C["border2"], sashwidth=6, bd=0, sashrelief="flat", opaqueresize=False,
                                showhandle=False, sashcursor="sb_h_double_arrow")
         split.pack(fill="both", expand=True)
         self.cat_split = split
