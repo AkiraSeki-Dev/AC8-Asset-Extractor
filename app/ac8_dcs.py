@@ -400,6 +400,8 @@ class HelmetMap:
     INSET = 0.35  # the AC8 rim used is this far inside its edge (the original paint spills past the edge)
     GRID = 3072   # resolution of the AC8 shell's lookup image
     FRONT = (35, 50)  # degrees from the front: the raise (and its rim warp) is full up to the first, gone by the second
+    ROWBAND = 160  # texels (at 4096): the least a row's end is eased in over
+    SIDE_WARP = 1  # 1: the sides are pulled out to the DCS edge in the flat view (0: only stretched along the rows)
     ALONG = 0.05  # radians of rim the side stretch is evened out over
     SQUEEZE = 0.02  # radians: how far in from the AC8 edge paint that would run past it is eased in
     UNDER = 0.03  # at the front: the strip of the AC8 design under the name that is stretched to the DCS edge
@@ -613,7 +615,7 @@ class HelmetMap:
         disp_side = np.stack([np.convolve(np.r_[disp_side[-pw:, c], disp_side[:, c], disp_side[:pw, c]], kk_,
                                           mode="valid") for c in (0, 1)], 1)
         wf_ = front_weight(np.arctan2(bd[:, 1], bd[:, 0]))[:, None]
-        disp = wf_ * disp_front + (1 - wf_) * disp_side
+        disp = wf_ * disp_front + (1 - wf_) * disp_side * self.SIDE_WARP
         G = 384
         gx_, gy_ = np.meshgrid(np.linspace(-lim, lim, G), np.linspace(-lim, lim, G))
         cells = np.stack([gx_.ravel(), gy_.ravel()], 1)
@@ -676,6 +678,7 @@ class HelmetMap:
         # 1. where each DCS texel lands on the flattened AC8 shell: as lined up, plus the warp
         qx_all = np.zeros(n_all)
         qy_all = np.zeros(n_all)
+        keep_all = np.zeros(n_all, bool)
         for s0 in range(0, n_all, 500000):
             sl = slice(s0, s0 + 500000)
             pts = (bar_d_all[sl, :, None].astype(np.float64) * Vd[Fd[tri_d_all[sl]]]).sum(1)
@@ -701,6 +704,71 @@ class HelmetMap:
             dv = (D[j0, i0] * (1 - ax) * (1 - ay) + D[j0, i0 + 1] * ax * (1 - ay)
                   + D[j0 + 1, i0] * (1 - ax) * ay + D[j0 + 1, i0 + 1] * ax * ay)
             qx_all[sl], qy_all[sl] = px + dv[:, 0], py + dv[:, 1]
+            keep_all[sl] = front_weight(phi) > 0.02
+
+        # 2. where the DCS shell reaches past the AC8 one (away from the front), each row of the DCS texture is
+        # stretched sideways out to the shell's end: the row keeps its own paint, so nothing shifts up or down.
+        # The gap at each row's end is evened out from row to row (no steps), and the stretch eases in over a
+        # band a few times wider than the gap.
+        qa_ = np.arctan2(qy_all, qx_all)
+        rq = np.hypot(qx_all, qy_all)
+        ok_all = rq <= ray_at(qa_) - 0.006
+        ROWQ = {}
+        ys_u = pix[:, 1]
+        order_ = np.lexsort((pix[:, 0], ys_u))
+        ys_o = ys_u[order_]
+        starts = np.r_[0, np.nonzero(np.diff(ys_o))[0] + 1]
+        ends = np.r_[starts[1:], len(order_)]
+        rows = ys_o[starts]
+        gl = np.zeros(len(rows))
+        gr = np.zeros(len(rows))
+        for i_, (a0, a1) in enumerate(zip(starts, ends)):
+            idx = order_[a0:a1]
+            xs_ = pix[idx, 0]
+            ok_ = ok_all[idx]
+            kp_ = keep_all[idx]
+            ROWQ[i_] = idx
+            if ok_.all() or not ok_.any():
+                continue
+            # the row's first and last stretch of shell (its ends); a gap only counts if the end isn't the front
+            br = np.nonzero(np.diff(xs_) > 1)[0]
+            l_end = br[0] + 1 if len(br) else len(xs_)
+            r_start = br[-1] + 1 if len(br) else 0
+            okl = np.nonzero(ok_[:l_end])[0]
+            if len(okl) and okl[0] > 0 and not kp_[:okl[0]].any():
+                gl[i_] = okl[0]
+            okr = np.nonzero(ok_[r_start:])[0]
+            if len(okr) and r_start + okr[-1] < len(xs_) - 1 and not kp_[r_start + okr[-1] + 1:].any():
+                gr[i_] = len(xs_) - 1 - (r_start + okr[-1])
+
+        def even(g_):
+            wn_ = max(int(0.004 * H), 2)
+            ext_ = np.r_[np.zeros(wn_), g_, np.zeros(wn_)]
+            mx_ = np.max(np.stack([ext_[i:i + len(g_)] for i in range(2 * wn_ + 1)]), 0)
+            k2 = np.exp(-0.5 * (np.arange(-2 * wn_, 2 * wn_ + 1) / wn_) ** 2)
+            return np.convolve(np.r_[np.zeros(2 * wn_), mx_, np.zeros(2 * wn_)], k2 / k2.sum(), mode="valid")
+        gl, gr = even(gl), even(gr)
+        band0 = self.ROWBAND * W / 4096
+        for i_ in np.nonzero((gl > 0.05) | (gr > 0.05))[0]:
+            idx = ROWQ[i_]
+            n_ = len(idx)
+            if n_ < 8:
+                continue
+            xs_ = np.arange(n_, dtype=np.float64)
+            src = xs_.copy()
+            for g_, side in ((gl[i_], -1), (gr[i_], 1)):
+                if g_ <= 0.05:
+                    continue
+                B = min(max(3 * g_, band0), n_ / 2)
+                t = xs_ if side < 0 else (n_ - 1 - xs_)       # distance in from this end
+                m_ = t < B + g_
+                u_ = np.clip(t[m_] / (B + g_), 0, 1)
+                # t -> g + B*h(u), h eases from slope (B+g)/B... smooth: reads further in near the end
+                new_t = t[m_] + g_ * (1 - u_) ** 2
+                src[m_] = new_t if side < 0 else (n_ - 1 - new_t)
+            qx_r, qy_r = qx_all[idx].copy(), qy_all[idx].copy()
+            qx_all[idx] = np.interp(src, xs_, qx_r)
+            qy_all[idx] = np.interp(src, xs_, qy_r)
 
         # 3. read the AC8 UV (and triangle) there
         uv_a = np.zeros((n_all, 2), np.float32)
