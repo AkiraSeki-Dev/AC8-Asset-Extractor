@@ -75,6 +75,11 @@ jobs:
           echo "}" >> "AC8 Unpacker/tools/versions.json"
           cat "AC8 Unpacker/tools/versions.json"
 
+      - name: Mark it as a live build
+        if: steps.ver.outputs.skip == 'false'
+        run: |
+          echo '{"channel": "live", "build": 0}' > app/build_info.json
+
       - name: Package
         if: steps.ver.outputs.skip == 'false'
         env:

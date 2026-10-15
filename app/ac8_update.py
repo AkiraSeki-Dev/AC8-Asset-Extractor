@@ -1,9 +1,12 @@
 """Updating the app itself from its GitHub releases (https://github.com/AkiraSeki-Dev/AC8-Asset-Extractor).
 
-A release is tagged vX.Y.Z and carries AC8_Asset_Extractor_vX.Y.Z.zip (one "AC8 Asset Extractor" folder inside). Updating
+Two channels. Live: a release is tagged vX.Y.Z and carries AC8_Asset_Extractor_vX.Y.Z.zip (one "AC8 Asset Extractor" folder inside). Updating
 copies the new files over the app folder but never touches the user's own files: settings, asset list and history,
 exports, logs, the AES key and the unpacking tools (those have their own updater, see ac8_tools.py).
+Test: a test build (app/build_info.json says {"channel": "test", "build": N}) only follows the "Test build"
+pre-release (tag test-latest), whose build.json names its build number and zip.
 """
+import json
 import io
 import os
 import re
@@ -54,6 +57,31 @@ def latest():
     except Exception:
         pass
     return {"version": version, "url": url, "notes": notes}
+
+
+TEST_TAG = "test-latest"
+
+
+def build_info(code_dir):
+    """{'channel': 'live' | 'test', 'build': N, 'commit': sha} written into the package by the build; a copy run
+    straight from the repo counts as live."""
+    try:
+        info = json.loads((Path(code_dir) / "build_info.json").read_text(encoding="utf-8"))
+        if isinstance(info, dict) and info.get("channel") in ("live", "test"):
+            info["build"] = int(info.get("build") or 0)
+            return info
+    except (OSError, ValueError, TypeError):
+        pass
+    return {"channel": "live", "build": 0}
+
+
+def latest_test():
+    """{'version': 'Test-N', 'build': N, 'url': zip download, 'notes': what changed} of the current test build."""
+    base = f"https://github.com/{REPO}/releases/download/{TEST_TAG}"
+    info = json.loads(_get(f"{base}/build.json").decode("utf-8"))
+    build = int(info["build"])
+    return {"version": f"Test-{build}", "build": build, "url": f"{base}/{info['zip']}",
+            "notes": str(info.get("notes") or "")}
 
 
 def _kept(rel):

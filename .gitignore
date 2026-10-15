@@ -19,3 +19,4 @@ output.txt
 __pycache__/
 *.pyc
 *.new
+app/build_info.json

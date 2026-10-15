@@ -56,6 +56,13 @@ DEPS_FILE = DATA_DIR / "mesh_textures.json"      # the materials / textures each
 ARROW = "arrow" if os.name == "nt" else ""  # the standard pointer (X11's own "arrow" is a different shape)
 FONTS_DIR = CODE / "fonts"
 ASSETS_DIR = CODE / "assets"
+try:  # which update channel this copy is on: live releases, or the test builds (the test-build branch)
+    import ac8_update as _upd
+    BUILD = _upd.build_info(CODE)
+except Exception:
+    BUILD = {"channel": "live", "build": 0}
+IS_TEST = BUILD.get("channel") == "test"
+VERSION_LABEL = f"Test-{BUILD['build']}" if IS_TEST else APP_VERSION   # shown as v<label>
 
 RAW_DIR_NAME = "1_Raw_UAssets"
 FINAL_DIR_NAME = "2_Final_Export"
@@ -318,7 +325,7 @@ class SessionLog:
                     pass
             self.path = LOGS_DIR / f"session_{_dt.datetime.now():%Y-%m-%d_%H-%M-%S}.txt"
             self.f = open(self.path, "a", encoding="utf-8", buffering=1)
-            self.f.write(f"{APP_NAME} v{APP_VERSION}  ·  {sys.platform}  ·  Python {sys.version.split()[0]}\n")
+            self.f.write(f"{APP_NAME} v{VERSION_LABEL}  ·  {sys.platform}  ·  Python {sys.version.split()[0]}\n")
         except Exception:
             self.f = None
 
@@ -976,7 +983,7 @@ class App(tk.Tk):
         super().__init__()
         setup_fonts(self)
         setup_ttk(self)
-        self.title(f"{APP_NAME}  v{APP_VERSION}")
+        self.title(f"{APP_NAME}  v{VERSION_LABEL}")
         self.geometry(f"{round(1440 * SCALE)}x{round(900 * SCALE)}")
         self.minsize(1100, 680)
         self.configure(bg=C["bg0"])
@@ -1083,7 +1090,8 @@ class App(tk.Tk):
             pass
         self.after(400, lambda: self._clear_scratch(previews=not self.v_keep_previews.get()))
         self.v_search.trace_add("write", lambda *_: self._search_soon())
-        self._log(f"{APP_NAME} v{APP_VERSION}")
+        self._log(f"{APP_NAME} v{VERSION_LABEL}"
+                  + (f"  (test build of {APP_VERSION}, commit {BUILD.get('commit', '?')})" if IS_TEST else ""))
         if self._removed_files:
             self._log("  Tidied up files older versions left behind: " + ", ".join(self._removed_files))
         if not UNPACKER_DIR:
@@ -1121,7 +1129,7 @@ class App(tk.Tk):
         brand = tk.Frame(bar, bg=C["bg1"])
         brand.pack(side="left", padx=(10, 20))
         tk.Label(brand, text="ACE COMBAT 8", bg=C["bg1"], fg=C["text1"], font=F["title"]).pack(anchor="w")
-        tk.Label(brand, text=f"ASSET EXTRACTOR  v{APP_VERSION}", bg=C["bg1"], fg=C["accent"], font=F["tiny"]).pack(anchor="w")
+        tk.Label(brand, text=f"ASSET EXTRACTOR  v{VERSION_LABEL}", bg=C["bg1"], fg=C["accent"], font=F["tiny"]).pack(anchor="w")
 
         self.search_in = Input(bar, self.v_search, icon="⌕", font=F["input"],
                                placeholder="Search assets…")
@@ -1835,7 +1843,7 @@ class App(tk.Tk):
         row = tk.Frame(box, bg=C["bg1"])
         row.pack(fill="x", pady=3)
         label(row, "Version")
-        tk.Label(row, text=f"v{APP_VERSION}", bg=C["bg1"], fg=C["text1"], font=F["base"]).pack(side="left")
+        tk.Label(row, text=f"v{VERSION_LABEL}" + ("  (test builds)" if IS_TEST else ""), bg=C["bg1"], fg=C["text1"], font=F["base"]).pack(side="left")
         rel = tk.Label(row, text="  release notes", bg=C["bg1"], fg=C["accent"], font=F["small"], cursor="hand2")
         rel.pack(side="left")
         rel.bind("<Button-1>", lambda e: __import__("webbrowser").open(__import__("ac8_update").RELEASES_PAGE))
@@ -2705,18 +2713,18 @@ class App(tk.Tk):
         def work():
             self.post("step", "Checking GitHub for a new version of the app…")
             try:
-                info = ac8_update.latest()
+                info = self._latest_app()
             except Exception as e:
                 import ac8_tools
                 raise RuntimeError(f"Couldn't check for updates: {ac8_tools.friendly_error(e)}.")
-            if not ac8_update.newer(info["version"], APP_VERSION):
-                return f"✔ You have the latest version (v{APP_VERSION})"
+            if not self._app_is_newer(info):
+                return f"✔ You have the latest {'test build' if IS_TEST else 'version'} (v{VERSION_LABEL})"
             box, ev = {}, threading.Event()
 
             def ask():
                 notes = info["notes"].strip()
                 box["ok"] = messagebox.askyesno(
-                    APP_NAME, f"Version {info['version']} is available (you have {APP_VERSION}).\n\n"
+                    APP_NAME, f"{'Test build' if IS_TEST else 'Version'} {info['version']} is available (you have {VERSION_LABEL}).\n\n"
                               + (notes[:900] + ("…" if len(notes) > 900 else "") + "\n\n" if notes else "")
                               + "Update now? Your settings, exports and asset list are kept. The app restarts "
                                 "afterwards.")
@@ -2732,6 +2740,19 @@ class App(tk.Tk):
             return f"✔ Updated to v{info['version']} — restarting…"
 
         self._start(work, "Checking for app updates…")
+
+    @staticmethod
+    def _latest_app():
+        """The newest build on this copy's channel: the live release, or (test builds) the current test build."""
+        import ac8_update
+        return ac8_update.latest_test() if IS_TEST else ac8_update.latest()
+
+    @staticmethod
+    def _app_is_newer(info):
+        import ac8_update
+        if IS_TEST:
+            return info.get("build", 0) > BUILD.get("build", 0)
+        return ac8_update.newer(info["version"], APP_VERSION)
 
     def _restart(self):
         self._save_settings()
@@ -2753,9 +2774,8 @@ class App(tk.Tk):
         def run():
             app_new, tool_new = None, []
             try:
-                import ac8_update
-                info = ac8_update.latest()
-                if ac8_update.newer(info["version"], APP_VERSION):
+                info = self._latest_app()
+                if self._app_is_newer(info):
                     app_new = info["version"]
             except Exception:
                 pass
@@ -2772,7 +2792,7 @@ class App(tk.Tk):
         threading.Thread(target=run, daemon=True).start()
 
     def _show_updates(self, app_new, tool_new):
-        parts = ([f"App v{app_new} (you have v{APP_VERSION})"] if app_new else []) + tool_new
+        parts = ([f"App v{app_new} (you have v{VERSION_LABEL})"] if app_new else []) + tool_new
         self.v_upd.set("Updates available: " + " · ".join(parts))
         for b in (self.upd_btn_app, self.upd_btn_tools):
             b.pack_forget()

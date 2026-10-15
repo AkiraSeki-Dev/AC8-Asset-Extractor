@@ -128,6 +128,9 @@ AC8 Asset Extractor\
 
 - **The app:** Settings → APP → **Check for updates**. Your settings, file list, exports and key are kept.
 - **The unpacking tools:** Settings → SETUP → **Check for updates**.
+- **Test builds** (the "Test build" pre-release, shown as **vTest-N** in the top left): a copy installed from one
+  only updates to newer test builds, in the same way (the bar at start-up, or Settings → APP → **Check for
+  updates**). To go back to the live version, install the latest release.
 - Every time it starts, the app checks for a newer app, retoc and repak. If there is one, a green bar shows it with
   **Update app** / **Update tools** buttons.
 

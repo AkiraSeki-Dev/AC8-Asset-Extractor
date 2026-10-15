@@ -1,6 +1,8 @@
 # A build to try out before releasing: push to the test-build branch (or run it from the Actions tab). The files
 # (Setup.exe + portable zip, same as a release) appear on the Releases page as the "Test build" pre-release,
-# replacing the previous one. Pre-releases are never "latest", so the app's updater never offers them.
+# replacing the previous one. Each test build is numbered (Test-<run number>, shown as vTest-N in the app) and
+# carries build.json; copies installed from a test build update only to newer test builds (live copies never
+# see them, since pre-releases are never "latest").
 name: Test build
 
 on:
@@ -22,8 +24,10 @@ jobs:
         run: |
           v=$(python3 -c "import re; print(re.search(r'APP_VERSION = \"([^\"]+)\"', open('app/AC8_Asset_Extractor.py', encoding='utf-8').read()).group(1))")
           short=$(git rev-parse --short HEAD)
-          echo "tag=v$v-test-$short" >> "$GITHUB_OUTPUT"
+          echo "tag=vTest-${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          echo "build=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
           echo "short=$short" >> "$GITHUB_OUTPUT"
+          echo "app=$v" >> "$GITHUB_OUTPUT"
 
       - name: Check the code
         run: python3 -m py_compile app/*.py "AC8 Unpacker/ac8_unpack.py"
@@ -54,6 +58,24 @@ jobs:
           echo "}" >> "AC8 Unpacker/tools/versions.json"
           cat "AC8 Unpacker/tools/versions.json"
 
+      - name: Mark it as a test build
+        env:
+          BUILD: ${{ steps.ver.outputs.build }}
+          SHORT: ${{ steps.ver.outputs.short }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          b, short, tag = int(os.environ["BUILD"]), os.environ["SHORT"], os.environ["TAG"]
+          json.dump({"channel": "test", "build": b, "commit": short}, open("app/build_info.json", "w"))
+          notes = subprocess.run(["git", "log", "-1", "--format=%B"], capture_output=True, text=True).stdout
+          notes = "\n".join(l for l in notes.strip().splitlines()
+                            if not l.startswith(("Co-Authored-By:", "Claude-Session:"))).strip()
+          json.dump({"build": b, "commit": short, "zip": f"AC8_Asset_Extractor_{tag}.zip", "notes": notes},
+                    open("build.json", "w"), indent=1)
+          PY
+          cat app/build_info.json build.json
+
       - name: Package
         env:
           TAG: ${{ steps.ver.outputs.tag }}
@@ -62,7 +84,7 @@ jobs:
           # only what the app needs to run (plus the licence / notice files the bundled tools and font require);
           # the launcher's source and the READMEs stay in the repo
           tar cf - --exclude=./.git --exclude=./.github --exclude=./.gitignore --exclude=./launcher --exclude=./installer \
-            --exclude=./README.md "--exclude=./AC8 Unpacker/README.md" --exclude=notes.md --exclude=__pycache__ . \
+            --exclude=./README.md "--exclude=./AC8 Unpacker/README.md" --exclude=notes.md --exclude=./build.json --exclude=__pycache__ . \
             | tar xf - -C "/tmp/pkg/AC8 Asset Extractor"
           (cd /tmp/pkg && zip -qr "$GITHUB_WORKSPACE/AC8_Asset_Extractor_${TAG}.zip" "AC8 Asset Extractor")
 
@@ -70,6 +92,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.ver.outputs.tag }}
+          APP: ${{ steps.ver.outputs.app }}
         run: |
           # a full, relocatable CPython for Windows that includes Tkinter (the embeddable package doesn't)
           gh release download --repo astral-sh/python-build-standalone \
@@ -92,7 +115,7 @@ jobs:
           sudo apt-get install -y -q nsis >/dev/null
           v="${TAG#v}"
           # Windows wants exactly four numbers for the file version: 1.2 -> 1.2.0.0, 1.2.1 -> 1.2.1.0
-          v4=$(python3 -c "import sys; p=(sys.argv[1].split('.') + ['0']*4)[:4]; print('.'.join(p))" "${v%%-*}")
+          v4=$(python3 -c "import sys; p=(sys.argv[1].split('.') + ['0']*4)[:4]; print('.'.join(p))" "$APP")
           makensis -V2 -DVERSION="$v" -DVERSION4="$v4" -DSRC=/tmp/inst \
             "-DOUT=$GITHUB_WORKSPACE/AC8_Asset_Extractor_${TAG}_Setup.exe" installer/ac8.nsi
           ls -la "$GITHUB_WORKSPACE/AC8_Asset_Extractor_${TAG}_Setup.exe"
@@ -104,7 +127,7 @@ jobs:
         run: |
           gh release delete test-latest --yes --cleanup-tag 2>/dev/null || true
           git push --delete origin refs/tags/test-latest 2>/dev/null || true
-          printf 'Test build of commit %s, for trying out before a release. Not a release: the app never updates to it.\n\nDownload **%s** (installer) or the zip (portable).\n' \
-            "${GITHUB_SHA::7}" "AC8_Asset_Extractor_${TAG}_Setup.exe" > notes.md
-          gh release create test-latest "AC8_Asset_Extractor_${TAG}_Setup.exe" "AC8_Asset_Extractor_${TAG}.zip" \
-            --prerelease --latest=false --title "Test build (${GITHUB_SHA::7})" --notes-file notes.md --target "$GITHUB_SHA"
+          printf '%s (commit %s), for trying out before a release. Copies installed from a test build update to newer test builds by themselves; live copies never see them.\n\nDownload **%s** (installer) or the zip (portable).\n' \
+            "${TAG#v}" "${GITHUB_SHA::7}" "AC8_Asset_Extractor_${TAG}_Setup.exe" > notes.md
+          gh release create test-latest "AC8_Asset_Extractor_${TAG}_Setup.exe" "AC8_Asset_Extractor_${TAG}.zip" build.json \
+            --prerelease --latest=false --title "Test build ${TAG#v} (${GITHUB_SHA::7})" --notes-file notes.md --target "$GITHUB_SHA"
