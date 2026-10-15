@@ -85,7 +85,7 @@ MAX_CMD_FILTERS_CHARS = 24000  # Windows command line limit is ~32k
 
 PACKAGES = {"numpy": "numpy", "PIL": "Pillow", "Crypto": "pycryptodome",
             "OpenGL": "PyOpenGL", "pyopengltk": "pyopengltk"}  # needed (the last two: the 3D viewer)
-OPTIONAL_PACKAGES = {}
+OPTIONAL_PACKAGES = {"tkinterdnd2": "tkinterdnd2"}  # dragging files in from Explorer
 
 # Asset types for browsing, from the standard UE naming prefixes (SM_, T_, MI_ ...).
 TYPES = [
@@ -703,6 +703,96 @@ def center_on(win, parent, size=None):
     win.deiconify()
 
 
+class FileDrop:
+    """Dropping files from Windows Explorer onto widgets (tkdnd, through the tkinterdnd2 package). Without the
+    package nothing happens; the app fetches it in the background once and turns dropping on when it's there."""
+    root = None
+    ready = False
+    pending = []   # (widgets, on_files) registered before tkdnd was loaded
+
+    @classmethod
+    def start(cls, root):
+        cls.root = root
+        if cls._load():
+            return
+        if not Path(sys.executable).resolve().is_relative_to(HERE.resolve()):
+            return  # not the app's own Python (run from source): Settings → Install packages adds it
+
+        def fetch():  # a copy updated from an older version doesn't have the package yet
+            try:
+                r = subprocess.run([console_python(), "-m", "pip", "install", "--quiet", "tkinterdnd2"],
+                                   capture_output=True, timeout=300, **_no_window())
+                if r.returncode == 0:
+                    importlib.invalidate_caches()
+                    root.after(0, cls._load)
+            except Exception:
+                pass
+        threading.Thread(target=fetch, daemon=True).start()
+
+    @classmethod
+    def _load(cls):
+        try:
+            from tkinterdnd2 import TkinterDnD
+            TkinterDnD._require(cls.root)
+        except Exception:
+            return False
+        cls.ready = True
+        for widgets, fn in cls.pending:
+            cls._register(widgets, fn)
+        cls.pending = []
+        return True
+
+    @classmethod
+    def add(cls, widgets, on_files, highlight=None):
+        """Dropping onto any of `widgets` calls on_files([Path, …]). highlight(True/False): while hovering."""
+        item = (widgets, (on_files, highlight))
+        if cls.ready:
+            cls._register(*item)
+        else:
+            cls.pending.append(item)
+
+    @classmethod
+    def _register(cls, widgets, fns):
+        on_files, highlight = fns
+        root = cls.root
+
+        def drop(data):
+            if highlight:
+                highlight(False)
+            try:
+                on_files([Path(p) for p in root.tk.splitlist(data)])
+            except Exception as e:
+                SLOG.write(f"drop: {e}")
+            return "copy"
+
+        def enter(*_):
+            if highlight:
+                highlight(True)
+            return "copy"
+
+        def leave(*_):
+            if highlight:
+                highlight(False)
+            return "copy"
+        c_drop, c_enter, c_leave = root.register(drop), root.register(enter), root.register(leave)
+        for w in widgets:
+            try:
+                if not w.winfo_exists():
+                    continue
+                root.tk.call("tkdnd::drop_target", "register", w._w, ("DND_Files",))
+                root.tk.call("bind", w._w, "<<Drop>>", c_drop + " %D")
+                root.tk.call("bind", w._w, "<<DropEnter>>", c_enter + " %D")
+                root.tk.call("bind", w._w, "<<DropPosition>>", c_enter + " %D")
+                root.tk.call("bind", w._w, "<<DropLeave>>", c_leave + " %D")
+            except tk.TclError:
+                pass
+
+
+def _no_window():
+    """subprocess options that keep a console window from flashing up on Windows."""
+    return {"creationflags": 0x08000000} if os.name == "nt" else {}
+
+
 def watch(widget, variable, fn):
     """variable.trace_add for a widget, removed again when the widget is destroyed — otherwise closing a window
     (Settings, Export textures) leaves traces on shared settings that call into widgets that no longer exist."""
@@ -1088,6 +1178,7 @@ class App(tk.Tk):
         self.after(100, self._pump)
         self.after(50, self._load_index_on_start)
         self.after(3000, self._startup_update_check)
+        FileDrop.start(self)
         self.after(1500, self._tools_if_missing)
         try:
             import ac8_update
@@ -5661,8 +5752,16 @@ class App(tk.Tk):
             row.pack(fill="x", pady=(6, 0))
             tk.Label(row, text=label, bg=C["bg1"], fg=C["text3"], font=F["tiny"], width=8, anchor="w").pack(side="left")
             Button(row, "Browse…", browse, font=F["small"], padx=10, pady=3).pack(side="right")
-            Input(row, var, placeholder="Pick a folder…", mono=True).pack(side="left", fill="x", expand=True,
-                                                                          padx=(0, 6))
+            inp = Input(row, var, placeholder="Pick a folder…", mono=True)
+            inp.pack(side="left", fill="x", expand=True, padx=(0, 6))
+
+            def dropped(fs, v_=var):
+                d_ = fs[0] if fs[0].is_dir() else fs[0].parent
+                v_.set(str(d_))
+                if v_ is self.v_dcs_src:
+                    self.v_dcs_extr.set("")
+                    self._dcs_default_out()
+            FileDrop.add([inp, inp.entry], dropped)
 
         # --- texture converter
         f = section("TEXTURE CONVERTER")
@@ -5781,12 +5880,27 @@ class App(tk.Tk):
             p_ = self.helmet_vars[key].get()
             shown.configure(text=Path(p_).name if p_ else "—", fg=C["text1"] if p_ else C["text3"])
         watch(shown, self.helmet_vars[key], refresh)
+        FileDrop.add([row, shown], lambda fs: self._helmet_pick(key, label, side, fs[0]),
+                     self._drop_highlight(shown))
 
-    def _helmet_pick(self, key, label, side):
-        start = self.dcs_cfg.get(f"helmet_dir_{side}") or str(HERE)
-        f = filedialog.askopenfilename(title=label, initialdir=start,
-                                       filetypes=[("Images", "*.png *.tga *.dds *.tif *.tiff"), ("All files", "*.*")])
-        if not f:
+    @staticmethod
+    def _drop_highlight(w):
+        """While a file is dragged over a slot: an accent outline."""
+        def hl(on):
+            try:
+                w.configure(highlightthickness=1, highlightbackground=C["accent"] if on else C["bg2"],
+                            highlightcolor=C["accent"] if on else C["bg2"])
+            except tk.TclError:
+                pass
+        return hl
+
+    def _helmet_pick(self, key, label, side, f=None):
+        if f is None:
+            start = self.dcs_cfg.get(f"helmet_dir_{side}") or str(HERE)
+            f = filedialog.askopenfilename(title=label, initialdir=start,
+                                           filetypes=[("Images", "*.png *.tga *.dds *.tif *.tiff"),
+                                                      ("All files", "*.*")])
+        if not f or not Path(f).is_file():
             return
         f = Path(f)
         self.helmet_vars[key].set(str(f))
@@ -5960,6 +6074,8 @@ class App(tk.Tk):
                 w_.configure(text=Path(p_).name if p_ else "—", fg=C["text1"] if p_ else C["text3"])
             watch(shown, var, refresh)
             refresh()
+            FileDrop.add([row, shown], lambda fs, r_=role, l_=label: self._set_pick(r_, l_, fs[0]),
+                         self._drop_highlight(shown))
         self._set_headers_update()
         mode = self.v_dcs_mode.get()
         self.lbl_set_suffix.configure(text="+ _Roughmet / _Normal" if mode in ("ac8_dcs", "pbr_dcs")
@@ -5988,13 +6104,14 @@ class App(tk.Tk):
             role = "plain" if role is None else role
         return role, name
 
-    def _set_pick(self, role, label):
+    def _set_pick(self, role, label, f=None):
         group = self._set_group()
-        start = self.dcs_cfg.get(f"set_dir_{group}") or str(HERE)
-        f = filedialog.askopenfilename(title=label, initialdir=start,
-                                       filetypes=[("Images", "*.png *.tga *.dds *.tif *.tiff *.jpg *.jpeg"),
-                                                  ("All files", "*.*")])
-        if not f:
+        if f is None:
+            start = self.dcs_cfg.get(f"set_dir_{group}") or str(HERE)
+            f = filedialog.askopenfilename(title=label, initialdir=start,
+                                           filetypes=[("Images", "*.png *.tga *.dds *.tif *.tiff *.jpg *.jpeg"),
+                                                      ("All files", "*.*")])
+        if not f or not Path(f).is_file():
             return
         f = Path(f)
         vars_ = self.set_vars[group]

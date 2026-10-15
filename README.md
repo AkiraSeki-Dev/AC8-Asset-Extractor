@@ -98,12 +98,13 @@ The **DCS** tab has the tools for DCS World mods:
   - **PBR → DCS:** any PBR maps (BaseColor, Metallic, Roughness, AO, Normal, Opacity) → DCS sets.
   - **DCS → PBR:** DCS sets → BaseColor (+ Opacity), Metallic, Roughness, AO and a normal map.
 
-  **One set:** pick each map into its slot (the rest of the set next to it is filled in for you) and give it a
+  **One set:** pick each map into its slot, or drag it in from Explorer (the rest of the set next to it is filled
+  in for you), and give it a
   **Name** (the suffixes are added). **Whole folder:** pick an extraction (AC8 modes) or any folder and every set in
   it is converted. **Save as** DDS (compressed, with mipmaps), PNG or TGA.
 - **F/A-18 pilot helmet (AC8 → DCS):** moves an Ace Combat 8 pilot helmet's colour, normal and metal/rough maps
   onto the DCS F/A-18 helmet's UV layout. Pick the AC8 colour map (`T_…_Helmet…_C`); the others are found next to
-  it. Give the DCS helmet's own textures to keep its visor and straps (the results get their names). About a
+  it (or drag the files from Explorer onto the slots). Give the DCS helmet's own textures to keep its visor and straps (the results get their names). About a
   minute or two. The design flows in smooth curves out to the DCS helmet's edge (the original texture's spill past
   the mesh edge isn't used); AC8's painted strap slots are carried across as they are, to touch up in your editor;
   **Move design up** lifts the front of the design so the name clears the DCS helmet's brow pad; **Name** sets

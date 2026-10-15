@@ -107,7 +107,7 @@ jobs:
           # the app's packages, as Windows wheels for Python 3.12 (not compiled here: wrong Python version)
           python3 -m pip install --quiet --no-compile --target /tmp/inst/python/Lib/site-packages \
             --platform win_amd64 --python-version 3.12 --implementation cp --only-binary=:all: \
-            numpy Pillow pycryptodome PyOpenGL pyopengltk
+            numpy Pillow pycryptodome PyOpenGL pyopengltk tkinterdnd2
           rm -rf /tmp/inst/python/Lib/site-packages/bin /tmp/inst/python/Lib/test /tmp/inst/python/Lib/idlelib \
                  /tmp/inst/python/include
           find /tmp/inst/python -name __pycache__ -type d -prune -exec rm -rf {} +
